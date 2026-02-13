@@ -119,7 +119,7 @@ class TaskManager {
       // 显示系统通知
       if (Notification.isSupported()) {
         new Notification({
-          title: '任务完成',
+          title: 'Task Complete',
           body: task.result.substring(0, 100) + (task.result.length > 100 ? '...' : ''),
           silent: false
         }).show();
@@ -171,7 +171,7 @@ let currentSender = null;
 
 // ===== Clawdbot WebSocket 配置 =====
 const CLAWDBOT_PORT = process.env.CLAWDBOT_PORT || 18789;
-const CLAWDBOT_TOKEN = process.env.CLAWDBOT_TOKEN || '6d4c9e5c78347a57af8f13136c162033f49229840cbe3c69';
+const CLAWDBOT_TOKEN = process.env.CLAWDBOT_TOKEN || '2ab8673b76059239a62412aac4d1dbc655d4d75205656db0';
 const CLAWDBOT_WS_URL = `ws://localhost:${CLAWDBOT_PORT}`;
 
 let clawdbotWs = null;
@@ -273,7 +273,7 @@ class TTSQueueManager {
 
       try {
         // 调用 TTS 生成音频
-        const audioData = await callMiniMaxTTS(item.sentence);
+        const audioData = await callEdgeTTS(item.sentence);
 
         if (audioData && mainWindow && !mainWindow.isDestroyed()) {
           // 发送音频块到前端
@@ -541,7 +541,7 @@ async function chatWithClawdbot(message) {
                     }
                   }
                 }
-                resolve('收到了，但没有找到回复内容。');
+                resolve('Received, but no reply content found.');
               }).catch(err => {
                 clearTimeout(timeout);
                 reject(err);
@@ -634,7 +634,7 @@ ipcMain.handle('openclaw:executeCommand', async (event, command) => {
     return {
       type: 'chat',
       data: null,
-      message: 'Clawdbot 暂时无法连接，请确保 clawdbot 服务正在运行。'
+      message: 'Clawdbot is temporarily unavailable. Make sure the service is running.'
     };
   }
 });
@@ -667,7 +667,7 @@ ipcMain.handle('deepgram:startListening', async (event) => {
   try {
     const apiKey = process.env.DEEPGRAM_API_KEY;
     if (!apiKey || apiKey === 'your_deepgram_api_key_here') {
-      return { success: false, error: '请先在 .env 文件中配置 DEEPGRAM_API_KEY' };
+      return { success: false, error: 'Please configure DEEPGRAM_API_KEY in .env file' };
     }
 
     currentSender = event.sender;
@@ -815,74 +815,42 @@ ipcMain.handle('deepgram:sendAudio', async (event, audioData) => {
   }
 });
 
-// ===== MiniMax TTS =====
-const MINIMAX_API_KEY = process.env.MINIMAX_API_KEY || '';
-const MINIMAX_GROUP_ID = process.env.MINIMAX_GROUP_ID || '';
-const MINIMAX_MODEL = process.env.MINIMAX_MODEL || 'speech-02-turbo';
+// ===== Edge-TTS =====
+const { execFile } = require('child_process');
+const fs = require('fs');
+const os = require('os');
 
 // 当前选择的音色（可被前端动态修改）
-let currentVoiceId = process.env.MINIMAX_VOICE_ID || 'Lovely_Girl';
+let currentVoiceId = 'en-US-EmmaMultilingualNeural';
 
-// 核心 TTS 函数（提取为独立函数，供 TTSQueueManager 调用）
-async function callMiniMaxTTS(text) {
-  if (!MINIMAX_API_KEY || !MINIMAX_GROUP_ID) {
-    throw new Error('MiniMax API Key 或 Group ID 未配置');
-  }
+// 核心 TTS 函数（使用 edge-tts CLI）
+async function callEdgeTTS(text) {
+  const tmpFile = path.join(os.tmpdir(), `edge-tts-${Date.now()}.mp3`);
+  console.log(`[TTS] edge-tts 生成语音 (音色: ${currentVoiceId}): "${text.substring(0, 50)}..."`);
 
-  console.log(`[TTS] MiniMax 生成语音 (音色: ${currentVoiceId}): "${text.substring(0, 50)}..."`);
+  return new Promise((resolve, reject) => {
+    const args = ['--voice', currentVoiceId, '--text', text, '--write-media', tmpFile];
+    execFile('edge-tts', args, { timeout: 15000 }, (error, stdout, stderr) => {
+      if (error) {
+        try { fs.unlinkSync(tmpFile); } catch (_) {}
+        return reject(new Error(`edge-tts 失败: ${error.message}`));
+      }
 
-  const response = await fetch(
-    `https://api.minimax.io/v1/t2a_v2?GroupId=${MINIMAX_GROUP_ID}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${MINIMAX_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: MINIMAX_MODEL,
-        text: text,
-        stream: false,
-        voice_setting: {
-          voice_id: currentVoiceId,
-          speed: 1.0,
-          vol: 1.0,
-          pitch: 0
-        },
-        audio_setting: {
-          sample_rate: 32000,
-          format: 'mp3',
-          bitrate: 128000
-        },
-        language_boost: 'Chinese'
-      })
-    }
-  );
+      try {
+        const audioBuffer = fs.readFileSync(tmpFile);
+        fs.unlinkSync(tmpFile);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`MiniMax API ${response.status}: ${errorText}`);
-  }
+        console.log(`[TTS] edge-tts 生成音频: ${audioBuffer.length} 字节`);
+        if (audioBuffer.length < 100) {
+          return reject(new Error('TTS 音频数据太小'));
+        }
 
-  const data = await response.json();
-
-  if (data.base_resp && data.base_resp.status_code !== 0) {
-    throw new Error(data.base_resp.status_msg || 'MiniMax 返回错误');
-  }
-
-  if (!data.data || !data.data.audio) {
-    throw new Error('无音频数据');
-  }
-
-  // MiniMax 返回 hex 编码的音频，转为 base64
-  const audioBuffer = Buffer.from(data.data.audio, 'hex');
-  console.log(`[TTS] MiniMax 生成音频: ${audioBuffer.length} 字节`);
-
-  if (audioBuffer.length < 100) {
-    throw new Error('TTS 音频数据太小');
-  }
-
-  return audioBuffer.toString('base64');
+        resolve(audioBuffer.toString('base64'));
+      } catch (readErr) {
+        reject(new Error(`读取音频文件失败: ${readErr.message}`));
+      }
+    });
+  });
 }
 
 // 前端设置音色
@@ -907,10 +875,10 @@ ipcMain.handle('tts:stop', async () => {
 // 非流式 TTS（兼容旧接口）
 ipcMain.handle('deepgram:textToSpeech', async (event, text) => {
   try {
-    const audioBase64 = await callMiniMaxTTS(text);
+    const audioBase64 = await callEdgeTTS(text);
     return { success: true, audio: audioBase64 };
   } catch (error) {
-    console.error('[TTS] MiniMax 失败:', error);
+    console.error('[TTS] Edge-TTS failed:', error);
     return { success: false, error: error.message };
   }
 });
@@ -975,7 +943,7 @@ ipcMain.handle('file:showInFolder', async (event, filePath) => {
     // 验证路径是否存在
     if (!fs.existsSync(expandedPath)) {
       console.warn('[File] 文件不存在:', expandedPath);
-      return { success: false, error: '文件不存在' };
+      return { success: false, error: 'File not found' };
     }
 
     // 在 Finder 中显示文件

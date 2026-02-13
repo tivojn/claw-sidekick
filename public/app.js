@@ -1,4 +1,4 @@
-// ===== 应用状态 =====
+// ===== App State =====
 let appState = 'welcome'; // welcome | idle | listening | thinking | speaking | followup | goodbye
 let isFirstLaunch = true;
 let isRecording = false;
@@ -13,26 +13,26 @@ let bubbleHideTimer = null;
 let auraAnimator = null;
 let executeTimer = null;
 let accumulatedTranscript = '';
-let lastAIResponse = ''; // 缓存最近一次 AI 回复，用于打断后查看
+let lastAIResponse = '';
 let countdownInterval = null;
 
-// ===== 角色系统 =====
+// ===== Character Profiles =====
 const CHARACTER_PROFILES = {
   lobster: {
     id: 'lobster',
-    name: '小虾米',
-    desc: '活泼可爱的龙虾助手',
+    name: 'Lobster',
+    desc: 'Fun & energetic AI buddy',
     icon: 'mdi:fish',
-    welcomeText: '大家好，我是你的AI助手小虾米，我可以帮你做一切事儿，有什么可以帮到你的？',
+    welcomeText: "Hey! What's up? I'm your AI buddy, hit me up with anything!",
     thinkingPrompts: [
-      '请稍等，我帮您查询一下~',
-      '让我想想怎么帮您...',
-      '正在努力思考中...',
-      '马上就好，稍等片刻~',
-      '让我看看能帮您做什么...',
-      '收到！正在处理中...',
-      '好的，我来帮您搞定~',
-      '稍等一下，马上给您答案！'
+      'Hang on, let me check...',
+      'Hmm, thinking about it...',
+      'Working on it...',
+      'One sec, almost there...',
+      'Let me figure this out...',
+      'Got it! Processing now...',
+      'On it, give me a moment...',
+      'Hold tight, answer coming!'
     ],
     videos: {
       welcome: 'lobster-welcome.mp4',
@@ -49,28 +49,27 @@ const CHARACTER_PROFILES = {
       thinking: { r: 245, g: 158, b: 11 },
       speaking: { r: 118, g: 75, b: 162 }
     },
-    defaultVoice: 'Lovely_Girl'
+    defaultVoice: 'en-US-EmmaMultilingualNeural'
   },
   amy: {
     id: 'amy',
     name: 'Amy',
-    desc: '温柔知性的女助手',
+    desc: 'Warm & witty assistant',
     icon: 'mdi:account-heart',
-    welcomeText: '你好，我是Amy，很高兴为你服务！有什么我可以帮助你的吗？',
+    welcomeText: "Yo! I'm Amy, what can I do for ya?",
     thinkingPrompts: [
-      '请稍等，让我想想...',
-      '正在为你查找...',
-      '稍等片刻~',
-      '让我看看...',
-      '好的，马上处理...',
-      '正在思考中...',
+      'Let me think...',
+      'Looking it up for you...',
+      'Just a moment...',
+      'Let me see...',
+      'Sure, on it...',
+      'Thinking...',
     ],
-    // 查询前的提示语（先播放这个再执行查询）
     preQueryPrompts: [
-      '好的，Amy马上帮哥哥去查询',
-      '收到，Amy这就去查',
-      '好的哥哥，Amy这就去看看',
-      '明白了，Amy马上处理',
+      "Sure thing, let me look that up!",
+      "Got it, checking now!",
+      "On it, one sec!",
+      "Alright, let me find out!",
     ],
     videos: {
       welcome: 'amy-welcome.mp4',
@@ -87,21 +86,21 @@ const CHARACTER_PROFILES = {
       thinking: { r: 255, g: 183, b: 178 },
       speaking: { r: 255, g: 134, b: 154 }
     },
-    defaultVoice: 'Arrogant_Miss'
+    defaultVoice: 'zh-CN-XiaoyiNeural'
   },
   cat: {
     id: 'cat',
-    name: '喵助理',
-    desc: '优雅慵懒的猫咪助手',
+    name: 'Cat',
+    desc: 'Chill & curious cat helper',
     icon: 'mdi:cat',
-    welcomeText: '喵～我是喵助理，有什么需要帮忙的喵？',
+    welcomeText: "Meow! Hey there, need a paw with something?",
     thinkingPrompts: [
-      '喵～让我想想...',
-      '正在思考喵～',
-      '稍等一下喵～',
-      '让喵查查看...',
-      '喵在努力思考了～',
-      '马上就好喵！',
+      'Meow~ let me think...',
+      'Thinking, meow~',
+      'One moment, meow~',
+      'Let me check, meow...',
+      'Working hard, meow~',
+      'Almost done, meow!',
     ],
     videos: {
       welcome: 'cat-welcome.mp4',
@@ -118,21 +117,21 @@ const CHARACTER_PROFILES = {
       thinking: { r: 255, g: 213, b: 79 },
       speaking: { r: 171, g: 130, b: 255 }
     },
-    defaultVoice: 'Sweet_Girl_2'
+    defaultVoice: 'zh-CN-XiaomengNeural'
   },
   robot: {
     id: 'robot',
-    name: '机甲助手',
-    desc: '高效精准的机器人助手',
+    name: 'Mecha',
+    desc: 'Precise & efficient robot',
     icon: 'mdi:robot',
-    welcomeText: '系统已就绪。我是机甲助手，随时为您效劳。',
+    welcomeText: "Systems online. What's the mission?",
     thinkingPrompts: [
-      '正在分析数据...',
-      '运算处理中...',
-      '检索信息中...',
-      '系统处理中，请稍候...',
-      '正在执行分析...',
-      '数据处理中...',
+      'Analyzing data...',
+      'Computing...',
+      'Retrieving info...',
+      'System processing, standby...',
+      'Running analysis...',
+      'Crunching numbers...',
     ],
     videos: {
       welcome: 'robot-welcome.mp4',
@@ -149,20 +148,20 @@ const CHARACTER_PROFILES = {
       thinking: { r: 255, g: 200, b: 0 },
       speaking: { r: 0, g: 150, b: 255 }
     },
-    defaultVoice: 'Robot_Armor'
+    defaultVoice: 'zh-CN-YunjianNeural'
   }
 };
 
 let currentCharacter = CHARACTER_PROFILES.lobster;
 
-// 当前角色的视频状态映射（动态切换）
+// Current character video state mapping
 let VIDEO_SOURCES = { ...currentCharacter.videos };
 
-// 追问后等待用户回复的超时（30秒无响应回到idle）
+// Follow-up timeout (30s no response → idle)
 const FOLLOWUP_TIMEOUT = 30000;
-// 气泡自动隐藏时间
+// Bubble auto-hide time
 const BUBBLE_AUTO_HIDE = 12000;
-// 延迟执行时间（用户停顿后等待的时间，从10秒优化为3秒）
+// Execute delay after user pause
 const EXECUTE_DELAY = 3000;
 
 // 处理中的提示语从当前角色配置获取
@@ -204,23 +203,22 @@ document.addEventListener('DOMContentLoaded', () => {
     playWelcomeVideo();
   }
 
-  console.log('[龙虾助手] 已初始化');
+  console.log('[App] 已初始化');
 });
 
 // ===== 初始化任务监听器 =====
 function initTaskListeners() {
   // 监听任务完成
   window.electronAPI.task.onCompleted((data) => {
-    console.log('[龙虾助手] 任务完成:', data.taskId);
+    console.log('[App] 任务完成:', data.taskId);
 
     const cleanResult = cleanMarkdown(data.result);
 
     // 显示完成通知气泡
-    showBubble(`✅ 任务完成！${cleanResult}`);
+    showBubble(`Done! ${cleanResult}`);
 
-    // 播放完成语音
-    playTextToSpeech(`任务完成了！${cleanResult}`).catch(err => {
-      console.warn('[龙虾助手] 任务完成语音播放失败:', err);
+    playTextToSpeech(`Task complete! ${cleanResult}`).catch(err => {
+      console.warn('[App] Task completion TTS failed:', err);
     });
 
     // 切换到 speaking 状态
@@ -236,16 +234,15 @@ function initTaskListeners() {
 
   // 监听任务失败
   window.electronAPI.task.onFailed((data) => {
-    console.error('[龙虾助手] 任务失败:', data.taskId, data.error);
+    console.error('[App] 任务失败:', data.taskId, data.error);
 
     const cleanError = cleanMarkdown(data.error);
 
     // 显示失败通知
-    showBubble(`❌ 任务失败：${cleanError}`);
+    showBubble(`Failed: ${cleanError}`);
 
-    // 播放失败语音
-    playTextToSpeech(`抱歉，任务执行失败了：${cleanError}`).catch(err => {
-      console.warn('[龙虾助手] 任务失败语音播放失败:', err);
+    playTextToSpeech(`Sorry, task failed: ${cleanError}`).catch(err => {
+      console.warn('[App] Task failure TTS failed:', err);
     });
   });
 }
@@ -278,45 +275,43 @@ function setAppState(newState) {
   switch (newState) {
     case 'welcome':
       tapHint.classList.add('hidden');
-      stateText.textContent = `欢迎使用${currentCharacter.name}`;
+      stateText.textContent = `Welcome to ${currentCharacter.name}`;
       statusHint.textContent = '';
       break;
     case 'idle':
-      stateText.textContent = '点击我开始对话';
+      stateText.textContent = 'Type to start chatting';
       statusHint.textContent = '';
       break;
     case 'listening':
       lobsterChar.classList.add('listening');
       stateDot.classList.add('listening');
       statusHint.classList.add('listening');
-      stateText.textContent = '聆听中...';
-      statusHint.textContent = '请说话...';
+      stateText.textContent = 'Listening...';
+      statusHint.textContent = 'Speak now...';
       break;
     case 'thinking':
       lobsterChar.classList.add('thinking');
       stateDot.classList.add('thinking');
       statusHint.classList.add('thinking');
-      stateText.textContent = '思考中...';
-      statusHint.textContent = '🤔 正在分析您的问题';
+      stateText.textContent = 'Thinking...';
+      statusHint.textContent = 'Analyzing your question...';
       showBubble('<div class="thinking-dots"><span></span><span></span><span></span></div>', false);
       break;
     case 'speaking':
       lobsterChar.classList.add('speaking');
       stateDot.classList.add('speaking');
       statusHint.classList.add('speaking');
-      stateText.textContent = '回复中...';
-      statusHint.textContent = '💬 正在为您解答';
+      stateText.textContent = 'Replying...';
+      statusHint.textContent = 'Here comes the answer...';
       break;
     case 'followup':
-      // TTS播完后等待用户继续说话
       lobsterChar.classList.add('listening');
       stateDot.classList.add('listening');
       statusHint.classList.add('listening');
-      stateText.textContent = '继续说话，我在听...';
-      statusHint.textContent = '💬 可以继续提问';
-      // 超时回到idle
+      stateText.textContent = 'Keep talking, I\'m listening...';
+      statusHint.textContent = 'Ask me anything else';
       followupTimer = setTimeout(() => {
-        console.log('[龙虾助手] 追问超时，回到待机');
+        console.log('[App] Follow-up timeout, going idle');
         stopRecording().then(() => {
           setAppState('idle');
           hideBubble(2000);
@@ -324,8 +319,8 @@ function setAppState(newState) {
       }, FOLLOWUP_TIMEOUT);
       break;
     case 'goodbye':
-      stateText.textContent = '再见！';
-      statusHint.textContent = '👋 期待下次见面';
+      stateText.textContent = 'See ya!';
+      statusHint.textContent = 'Catch you later!';
       break;
   }
 
@@ -356,7 +351,7 @@ function switchVideo(state) {
 
     // 只在视频源不同时才切换
     if (!currentSrc.endsWith(newSrc)) {
-      console.log(`[视频切换] ${state} -> ${videoSource}`);
+      console.log(`[Video] ${state} -> ${videoSource}`);
 
       // 添加过渡动画
       videoElement.classList.add('video-transition');
@@ -378,7 +373,7 @@ function switchVideo(state) {
       videoElement.load();
       if (wasPlaying || useVideoAudio) {
         videoElement.play().catch(err => {
-          console.warn('[视频播放] 自动播放失败:', err);
+          console.warn('[Video] 自动播放失败:', err);
           // 如果有声播放失败，降级为静音播放
           if (useVideoAudio) {
             videoElement.muted = true;
@@ -396,39 +391,34 @@ function switchVideo(state) {
 
 // ===== 播放欢迎视频 =====
 function playWelcomeVideo() {
-  console.log('[龙虾助手] 播放欢迎视频');
+  console.log('[App] 播放欢迎视频');
   setAppState('welcome');
 
   const videoElement = document.getElementById('lobster-char');
   if (videoElement && videoElement.tagName === 'VIDEO') {
     // 移除 loop 属性，让欢迎视频只播放一次
     videoElement.loop = false;
-    // 使用视频自带音频（取消静音）
-    videoElement.muted = false;
+    // 始终静音视频，用 TTS 播放欢迎语
+    videoElement.muted = true;
 
     // 监听视频播放结束
     videoElement.onended = () => {
-      console.log('[龙虾助手] 欢迎视频播放完毕，切换到待机状态');
-      videoElement.loop = true; // 恢复循环播放
-      videoElement.muted = true; // 恢复静音（其他状态视频不需要声音）
-      videoElement.onended = null; // 移除事件监听
+      console.log('[App] 欢迎视频播放完毕，切换到待机状态');
+      videoElement.loop = true;
+      videoElement.onended = null;
       isFirstLaunch = false;
       setAppState('idle');
     };
 
-    // 确保视频播放（先尝试有声播放，失败则静音播放+TTS兜底）
+    // 播放静音视频 + TTS 欢迎语
     videoElement.play().catch(err => {
-      console.warn('[视频播放] 欢迎视频有声播放失败，尝试静音播放+TTS兜底:', err);
-      videoElement.muted = true;
-      videoElement.play().catch(err2 => {
-        console.warn('[视频播放] 欢迎视频自动播放完全失败:', err2);
-        videoElement.loop = true;
-        isFirstLaunch = false;
-        setAppState('idle');
-      });
-      // 静音播放成功时，用TTS兜底欢迎语音
-      playWelcomeAudioFallback();
+      console.warn('[Video] 欢迎视频自动播放失败:', err);
+      videoElement.loop = true;
+      isFirstLaunch = false;
+      setAppState('idle');
     });
+    // 用 edge-tts 播放欢迎语音
+    playWelcomeAudioFallback();
   }
 }
 
@@ -437,7 +427,7 @@ async function playWelcomeAudioFallback() {
   try {
     await playTextToSpeech(currentCharacter.welcomeText);
   } catch (error) {
-    console.warn('[龙虾助手] 欢迎语音TTS兜底播放失败:', error);
+    console.warn('[App] 欢迎语音TTS兜底播放失败:', error);
   }
 }
 
@@ -496,7 +486,7 @@ function showBubbleWithViewBtn(fullText, isInterrupted = false) {
   speechBubble.className = 'speech-bubble ai-response';
 
   const preview = fullText.length > 40 ? fullText.substring(0, 40) + '...' : fullText;
-  const label = isInterrupted ? '已打断，点击查看完整回复' : '点击查看完整回复';
+  const label = isInterrupted ? 'Interrupted — tap to see full reply' : 'Tap to see full reply';
 
   bubbleText.innerHTML = `<span class="bubble-preview">${escapeHtml(preview)}</span>`;
   appendViewTextBtn(fullText, label);
@@ -512,7 +502,7 @@ function appendViewTextBtn(fullText, label) {
 
   const btnWrap = document.createElement('div');
   btnWrap.className = 'view-text-btn-wrap';
-  btnWrap.innerHTML = `<button class="view-text-btn">${label || '查看完整文本'}</button>`;
+  btnWrap.innerHTML = `<button class="view-text-btn">${label || 'View full text'}</button>`;
   bubbleText.appendChild(btnWrap);
 
   btnWrap.querySelector('.view-text-btn').addEventListener('click', (e) => {
@@ -532,7 +522,7 @@ function openTextViewer(text) {
   viewer.className = 'text-viewer';
   viewer.innerHTML = `
     <div class="text-viewer-header">
-      <span class="text-viewer-title">完整回复</span>
+      <span class="text-viewer-title">Full Reply</span>
       <button class="text-viewer-close" id="text-viewer-close">×</button>
     </div>
     <div class="text-viewer-body">${escapeHtml(text)}</div>
@@ -598,13 +588,13 @@ function linkifyFilePaths(text) {
     let cleanPath = match.replace(/[。，,；;！!？?）)\]]+$/g, '');
 
     // 创建可点击的链接
-    return `<span class="file-path" data-path="${escapeHtml(cleanPath)}" title="点击在 Finder 中显示">${escapeHtml(cleanPath)}</span>`;
+    return `<span class="file-path" data-path="${escapeHtml(cleanPath)}" title="Show in Finder">${escapeHtml(cleanPath)}</span>`;
   });
 }
 
 // 打断当前任务（查询或播放）
 function interruptCurrentTask() {
-  console.log('[龙虾助手] 打断当前任务');
+  console.log('[App] 打断当前任务');
 
   // 设置中断标志
   isProcessing = false;
@@ -619,7 +609,7 @@ function interruptCurrentTask() {
 
   // 重置状态
   setAppState('idle');
-  showBubble('已打断');
+  showBubble('Interrupted');
 }
 
 // 初始化文件路径点击事件监听
@@ -641,7 +631,7 @@ function initFilePathClickHandler() {
         } else {
           console.warn('[File] 打开失败:', result.error);
           // 显示错误提示
-          showBubble(`无法打开路径: ${result.error}`);
+          showBubble(`Can't open path: ${result.error}`);
         }
       } catch (err) {
         console.error('[File] 调用失败:', err);
@@ -669,7 +659,7 @@ function initFilePathClickHandler() {
         } else {
           console.warn('[File] 打开失败:', result.error);
           // 显示错误提示
-          showBubble(`无法打开路径: ${result.error}`);
+          showBubble(`Can't open path: ${result.error}`);
         }
       } catch (err) {
         console.error('[File] 调用失败:', err);
@@ -683,12 +673,12 @@ function initDeepgramListeners() {
   window.electronAPI.deepgram.removeAllListeners();
 
   window.electronAPI.deepgram.onConnected(() => {
-    console.log('[龙虾助手] Deepgram 已连接');
+    console.log('[App] Deepgram 已连接');
   });
 
   window.electronAPI.deepgram.onTranscript((data) => {
     const { transcript, isFinal } = data;
-    console.log(`[龙虾助手] 识别 [${isFinal ? '最终' : '临时'}]: "${transcript}"`);
+    console.log(`[App] 识别 [${isFinal ? '最终' : '临时'}]: "${transcript}"`);
 
     if (isFinal) {
       if (transcript.trim().length > 0) {
@@ -707,7 +697,7 @@ function initDeepgramListeners() {
 
         // 延迟执行：等待用户停顿后执行命令（utterance_end 事件可提前触发）
         executeTimer = setTimeout(() => {
-          console.log('[龙虾助手] 用户停顿超时，执行命令');
+          console.log('[App] 用户停顿超时，执行命令');
           clearInterval(countdownInterval);
           const commandToExecute = accumulatedTranscript;
           accumulatedTranscript = '';
@@ -720,11 +710,11 @@ function initDeepgramListeners() {
         // 倒计时显示
         let countdown = Math.ceil(EXECUTE_DELAY / 1000);
         clearInterval(countdownInterval);
-        statusHint.textContent = `${countdown}秒后执行...  继续说话可重置`;
+        statusHint.textContent = `Executing in ${countdown}s... keep talking to reset`;
         countdownInterval = setInterval(() => {
           countdown--;
           if (countdown > 0) {
-            statusHint.textContent = `${countdown}秒后执行...  继续说话可重置`;
+            statusHint.textContent = `Executing in ${countdown}s... keep talking to reset`;
           } else {
             clearInterval(countdownInterval);
           }
@@ -740,12 +730,12 @@ function initDeepgramListeners() {
 
   // 监听语音结束事件（Deepgram 检测到用户停止说话）
   window.electronAPI.deepgram.onUtteranceEnd(() => {
-    console.log('[龙虾助手] 检测到语音结束');
+    console.log('[App] 检测到语音结束');
     if (accumulatedTranscript.trim().length > 0) {
       // 用户有有效语音且已停止说话，立即执行
       clearTimeout(executeTimer);
       clearInterval(countdownInterval);
-      console.log('[龙虾助手] 语音结束，立即执行命令');
+      console.log('[App] 语音结束，立即执行命令');
       const commandToExecute = accumulatedTranscript;
       accumulatedTranscript = '';
       stopRecording().then(() => {
@@ -755,14 +745,14 @@ function initDeepgramListeners() {
   });
 
   window.electronAPI.deepgram.onError((error) => {
-    console.error('[龙虾助手] Deepgram 错误:', error);
+    console.error('[App] Deepgram 错误:', error);
     stopRecording();
     setAppState('idle');
-    showBubble('识别出错了，再点我试试吧');
+    showBubble('Recognition error, tap me to try again');
   });
 
   window.electronAPI.deepgram.onClosed(() => {
-    console.log('[龙虾助手] Deepgram 连接关闭');
+    console.log('[App] Deepgram 连接关闭');
   });
 }
 
@@ -830,11 +820,11 @@ async function processAudioQueue() {
   isPlayingQueue = false;
   isSpeaking = false;
 
-  // TTS 播放完毕，进入追问模式
+  // TTS 播放完毕，回到 idle（text-only mode, no voice followup）
   if (appState === 'speaking') {
     isProcessing = false;
-    setAppState('followup');
-    await startRecording();
+    setAppState('idle');
+    textInput.focus();
   }
 }
 
@@ -887,7 +877,7 @@ async function startRecording() {
 
     const result = await window.electronAPI.deepgram.startListening();
     if (!result.success) {
-      showBubble('语音识别启动失败，请检查配置');
+      showBubble('Speech recognition failed to start');
       setAppState('idle');
       audioStream.getTracks().forEach(track => track.stop());
       audioStream = null;
@@ -913,14 +903,14 @@ async function startRecording() {
     isRecording = true;
 
   } catch (error) {
-    console.error('[龙虾助手] 录音失败:', error);
+    console.error('[App] 录音失败:', error);
     setAppState('idle');
     if (error.name === 'NotAllowedError') {
-      showBubble('请允许访问麦克风后再点我');
+      showBubble('Please allow microphone access');
     } else if (error.name === 'NotFoundError') {
-      showBubble('没检测到麦克风哦');
+      showBubble('No microphone detected');
     } else {
-      showBubble('录音启动失败: ' + error.message);
+      showBubble('Recording failed: ' + error.message);
     }
   }
 }
@@ -954,51 +944,33 @@ async function stopRecording() {
   await window.electronAPI.deepgram.stopListening();
 }
 
-// ===== 点击龙虾 → 开始聆听 =====
+// ===== 点击龙虾 → 聚焦文本输入 (voice disabled, text-only mode) =====
 async function onLobsterClick() {
-  // speaking 状态下允许打断 → 直接进入聆听（无需再次点击）
+  // speaking 状态下允许打断
   if (appState === 'speaking') {
     interruptTTS();
     isProcessing = false;
     if (lastAIResponse) {
       showBubbleWithViewBtn(lastAIResponse, true);
     }
-    // 打断后直接开始聆听
-    accumulatedTranscript = '';
-    setAppState('listening');
-    await startRecording();
+    setAppState('idle');
+    textInput.focus();
     return;
   }
 
-  // thinking 状态下允许打断 → 停止当前任务
+  // thinking 状态下允许打断
   if (appState === 'thinking') {
-    console.log('[龙虾助手] 打断查询任务');
+    console.log('[App] 打断查询任务');
     interruptCurrentTask();
     return;
   }
 
   if (isProcessing) return;
 
-  if (appState === 'listening' || appState === 'followup') {
-    // 再次点击 → 停止聆听
-    clearTimeout(executeTimer);
-    accumulatedTranscript = '';
-    await stopRecording();
-    setAppState('idle');
-    return;
-  }
-
-  // 清空之前的累积文本
-  accumulatedTranscript = '';
-
-  // 激活动画
+  // Activate bounce animation and focus text input
   lobsterChar.classList.add('active');
   setTimeout(() => lobsterChar.classList.remove('active'), 600);
-
-  // 开始聆听
-  hideBubble();
-  setAppState('listening');
-  await startRecording();
+  textInput.focus();
 }
 
 // ===== 处理命令 =====
@@ -1006,11 +978,11 @@ async function handleCommand(command) {
   if (isProcessing) return;
 
   // 检测是否是异步任务
-  const asyncKeywords = ['稍后', '待会', '查完告诉我', '完成后告诉我', '好了告诉我', '处理完告诉我'];
+  const asyncKeywords = ['later', 'when done', 'let me know', 'notify me', 'tell me when', 'in the background'];
   const isAsyncTask = asyncKeywords.some(keyword => command.includes(keyword));
 
   // 检测是否是告别语
-  const goodbyeKeywords = ['再见', '拜拜', '退出', '关闭', 'bye', 'goodbye'];
+  const goodbyeKeywords = ['bye', 'goodbye', 'see ya', 'later', 'quit', 'exit', 'close'];
   const isGoodbye = goodbyeKeywords.some(keyword =>
     command.toLowerCase().includes(keyword)
   );
@@ -1033,14 +1005,14 @@ async function handleAsyncTask(command) {
     const result = await window.electronAPI.task.create(command);
 
     if (result.success) {
-      console.log(`[龙虾助手] 创建异步任务: ${result.taskId}`);
+      console.log(`[App] 创建异步任务: ${result.taskId}`);
 
       // 立即反馈
       const feedbackMessages = [
-        '好的，我去处理，稍后告诉你~',
-        '收到！我马上去查，完成后通知你',
-        '明白了，让我去看看，待会告诉你结果',
-        '好嘞，我去帮你搞定，完成后叫你~'
+        "On it! I'll let you know when it's done.",
+        "Got it! Working on it in the background.",
+        "Sure, I'll handle it and get back to you.",
+        "No worries, I'll take care of it!",
       ];
       const feedback = feedbackMessages[Math.floor(Math.random() * feedbackMessages.length)];
 
@@ -1050,8 +1022,8 @@ async function handleAsyncTask(command) {
       setAppState('idle');
     }
   } catch (error) {
-    console.error('[龙虾助手] 创建异步任务失败:', error);
-    showBubble('任务创建失败，请重试');
+    console.error('[App] 创建异步任务失败:', error);
+    showBubble('Failed to create task, try again');
     setAppState('idle');
   } finally {
     isProcessing = false;
@@ -1111,10 +1083,10 @@ async function handleSyncTask(command, isGoodbye) {
           setAppState('idle');
         }, 3000);
       } else {
-        // 进入追问模式
+        // 回到 idle（text-only mode）
         isProcessing = false;
-        setAppState('followup');
-        await startRecording();
+        setAppState('idle');
+        textInput.focus();
       }
     }
     // 如果是告别语，特殊处理
@@ -1128,8 +1100,8 @@ async function handleSyncTask(command, isGoodbye) {
     // 否则流式 TTS 会在 processAudioQueue 中自动进入 followup 模式
 
   } catch (error) {
-    console.error('[龙虾助手] 处理失败:', error);
-    showBubble('出错了，再点我试试吧');
+    console.error('[App] 处理失败:', error);
+    showBubble('Oops, something went wrong. Try again!');
     setAppState('idle');
     isProcessing = false;
     isSpeaking = false;
@@ -1138,14 +1110,14 @@ async function handleSyncTask(command, isGoodbye) {
 
 // ===== TTS 播放 =====
 async function playTextToSpeech(text) {
-  if (isSpeaking) interruptTTS();
+  if (isSpeaking && audioPlayer) interruptTTS();
 
   try {
     isSpeaking = true;
     const result = await window.electronAPI.deepgram.textToSpeech(text);
 
     if (!result.success) {
-      console.warn('[龙虾助手] TTS 失败:', result.error);
+      console.warn('[App] TTS 失败:', result.error);
       isSpeaking = false;
       return;
     }
@@ -1167,21 +1139,21 @@ async function playTextToSpeech(text) {
       };
 
       audioPlayer.onerror = (e) => {
-        console.error('[龙虾助手] TTS 播放错误:', e);
+        console.error('[App] TTS 播放错误:', e);
         isSpeaking = false;
         audioPlayer = null;
         resolve();
       };
 
       audioPlayer.play().catch((err) => {
-        console.error('[龙虾助手] TTS play() 失败:', err);
+        console.error('[App] TTS play() 失败:', err);
         isSpeaking = false;
         audioPlayer = null;
         resolve();
       });
     });
   } catch (error) {
-    console.error('[龙虾助手] TTS 失败:', error);
+    console.error('[App] TTS 失败:', error);
     isSpeaking = false;
     audioPlayer = null;
   }
@@ -1193,77 +1165,58 @@ const voiceList = document.getElementById('voice-list');
 const voiceSelectBtn = document.getElementById('voice-select-btn');
 const closeVoicePanel = document.getElementById('close-voice-panel');
 
-// MiniMax 系统音色列表（中文 + 英文）
+// Edge-TTS 音色列表（中文 + 英文）
 const VOICE_OPTIONS = [
-  // ===== 推荐 =====
-  { group: '推荐', lang: 'all', voices: [
-    { id: 'Lovely_Girl',         icon: 'mdi:ribbon', name: '可爱女孩',     desc: '甜美可爱', gender: 'female' },
-    { id: 'Lively_Girl',         icon: 'mdi:star-four-points', name: '活泼女孩',     desc: '元气满满', gender: 'female' },
-    { id: 'Decent_Boy',          icon: 'mdi:account', name: '阳光男孩',     desc: '清爽干净', gender: 'male' },
-    { id: 'Friendly_Person',     icon: 'mdi:emoticon-happy', name: '友善人士',     desc: '亲切自然', gender: 'female' },
+  // ===== 推荐（多语言） =====
+  { group: 'Multilingual (Recommended)', lang: 'all', voices: [
+    { id: 'en-US-EmmaMultilingualNeural',   icon: 'mdi:star-four-points', name: 'Emma',      desc: 'Cheerful & youthful', gender: 'female' },
+    { id: 'en-US-AvaMultilingualNeural',    icon: 'mdi:flower', name: 'Ava',       desc: 'Caring & expressive', gender: 'female' },
+    { id: 'en-US-AndrewMultilingualNeural', icon: 'mdi:account', name: 'Andrew',    desc: 'Warm & confident', gender: 'male' },
+    { id: 'en-US-BrianMultilingualNeural',  icon: 'mdi:emoticon-happy', name: 'Brian',     desc: 'Casual & sincere', gender: 'male' },
   ]},
-  // ===== 中文女声 =====
-  { group: '中文女声', lang: 'zh', voices: [
-    { id: 'Chinese (Mandarin)_Cute_Spirit',       icon: 'mdi:face-woman-shimmer', name: '可爱精灵',   desc: '灵动可爱', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Warm_Girl',         icon: 'mdi:flower', name: '温暖女孩',   desc: '温柔治愈', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Soft_Girl',         icon: 'mdi:cloud', name: '软萌女孩',   desc: '软绵绵', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Crisp_Girl',        icon: 'mdi:bell', name: '清脆女孩',   desc: '清亮脆嫩', gender: 'female' },
-    { id: 'Chinese (Mandarin)_BashfulGirl',       icon: 'mdi:emoticon-blush', name: '害羞女孩',   desc: '含蓄害羞', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Warm_Bestie',       icon: 'mdi:heart', name: '暖心闺蜜',   desc: '亲切温暖', gender: 'female' },
-    { id: 'Chinese (Mandarin)_IntellectualGirl',  icon: 'mdi:book-open-page-variant', name: '知性女孩',   desc: '知性优雅', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Sweet_Lady',        icon: 'mdi:flower-rose', name: '甜美女士',   desc: '成熟甜美', gender: 'female' },
-    { id: 'Chinese (Mandarin)_Mature_Woman',      icon: 'mdi:account-tie', name: '成熟女性',   desc: '沉稳大气', gender: 'female' },
-    { id: 'Chinese (Mandarin)_News_Anchor',       icon: 'mdi:television', name: '新闻主播',   desc: '标准播音', gender: 'female' },
-    { id: 'Arrogant_Miss',                        icon: 'mdi:crown', name: '傲娇小姐',   desc: '高冷傲娇', gender: 'female' },
-    { id: 'Sweet_Girl_2',                         icon: 'mdi:candy', name: '甜甜女孩',   desc: '甜蜜温柔', gender: 'female' },
-    { id: 'Exuberant_Girl',                       icon: 'mdi:party-popper', name: '热情女孩',   desc: '活力四射', gender: 'female' },
-    { id: 'Inspirational_girl',                   icon: 'mdi:sparkles', name: '元气少女',   desc: '正能量', gender: 'female' },
-    { id: 'Calm_Woman',                           icon: 'mdi:yoga', name: '平静女性',   desc: '沉稳安详', gender: 'female' },
-    { id: 'Wise_Woman',                           icon: 'mdi:book', name: '智慧女性',   desc: '专业成熟', gender: 'female' },
-    { id: 'Imposing_Manner',                      icon: 'mdi:chess-queen', name: '气场女王',   desc: '霸气十足', gender: 'female' },
+  { group: 'Chinese Female', lang: 'zh', voices: [
+    { id: 'zh-CN-XiaoxiaoNeural',    icon: 'mdi:ribbon', name: 'Xiaoxiao',   desc: 'Sweet & lively', gender: 'female' },
+    { id: 'zh-CN-XiaoyiNeural',      icon: 'mdi:face-woman-shimmer', name: 'Xiaoyi',    desc: 'Soft & friendly', gender: 'female' },
+    { id: 'zh-CN-XiaochenNeural',    icon: 'mdi:flower', name: 'Xiaochen',  desc: 'Elegant & smart', gender: 'female' },
+    { id: 'zh-CN-XiaohanNeural',     icon: 'mdi:cloud', name: 'Xiaohan',   desc: 'Warm & healing', gender: 'female' },
+    { id: 'zh-CN-XiaomengNeural',    icon: 'mdi:candy', name: 'Xiaomeng',  desc: 'Cute & sweet', gender: 'female' },
+    { id: 'zh-CN-XiaomoNeural',      icon: 'mdi:sparkles', name: 'Xiaomo',    desc: 'Gentle & artsy', gender: 'female' },
+    { id: 'zh-CN-XiaoqiuNeural',     icon: 'mdi:book-open-page-variant', name: 'Xiaoqiu',  desc: 'Mature & wise', gender: 'female' },
+    { id: 'zh-CN-XiaoruiNeural',     icon: 'mdi:school', name: 'Xiaorui',   desc: 'Calm & pro', gender: 'female' },
+    { id: 'zh-CN-XiaoshuangNeural',  icon: 'mdi:baby-face', name: 'Xiaoshuang',desc: 'Child voice', gender: 'female' },
+    { id: 'zh-CN-XiaoxuanNeural',    icon: 'mdi:crown', name: 'Xiaoxuan',  desc: 'Vibrant & bold', gender: 'female' },
+    { id: 'zh-CN-XiaozhenNeural',    icon: 'mdi:television', name: 'Xiaozhen', desc: 'News anchor', gender: 'female' },
   ]},
-  // ===== 中文男声 =====
-  { group: '中文男声', lang: 'zh', voices: [
-    { id: 'Chinese (Mandarin)_Gentle_Youth',       icon: 'mdi:weather-night', name: '温柔少年',   desc: '温柔细腻', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Straightforward_Boy',icon: 'mdi:arm-flex', name: '直爽男孩',   desc: '直率干脆', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Pure-hearted_Boy',   icon: 'mdi:heart-outline', name: '纯真男孩',   desc: '纯净清澈', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Gentleman',          icon: 'mdi:hat-fedora', name: '绅士',       desc: '儒雅有礼', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Male_Announcer',     icon: 'mdi:microphone', name: '男播音员',   desc: '浑厚播音', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Radio_Host',         icon: 'mdi:radio', name: '电台主持',   desc: '深夜电台', gender: 'male' },
-    { id: 'Chinese (Mandarin)_Reliable_Executive', icon: 'mdi:tie', name: '靠谱高管',   desc: '稳重专业', gender: 'male' },
-    { id: 'Young_Knight',                          icon: 'mdi:sword-cross', name: '少年骑士',   desc: '少年感', gender: 'male' },
-    { id: 'Casual_Guy',                            icon: 'mdi:sunglasses', name: '随性男生',   desc: '轻松随意', gender: 'male' },
-    { id: 'Patient_Man',                           icon: 'mdi:tree', name: '耐心男士',   desc: '温和耐心', gender: 'male' },
-    { id: 'Deep_Voice_Man',                        icon: 'mdi:microphone-variant', name: '低沉男声',   desc: '浑厚有力', gender: 'male' },
-    { id: 'Determined_Man',                        icon: 'mdi:target', name: '坚毅男士',   desc: '果断坚定', gender: 'male' },
-    { id: 'Elegant_Man',                           icon: 'mdi:glass-wine', name: '优雅男士',   desc: '儒雅精致', gender: 'male' },
-    { id: 'Robot_Armor',                           icon: 'mdi:robot', name: '机甲战士',   desc: '机器人', gender: 'male' },
+  { group: 'Chinese Male', lang: 'zh', voices: [
+    { id: 'zh-CN-YunxiNeural',       icon: 'mdi:account', name: 'Yunxi',     desc: 'Bright & youthful', gender: 'male' },
+    { id: 'zh-CN-YunjianNeural',     icon: 'mdi:sword-cross', name: 'Yunjian',   desc: 'Strong & steady', gender: 'male' },
+    { id: 'zh-CN-YunyangNeural',     icon: 'mdi:television', name: 'Yunyang',   desc: 'News anchor', gender: 'male' },
+    { id: 'zh-CN-YunyeNeural',       icon: 'mdi:book-open', name: 'Yunye',     desc: 'Narrator', gender: 'male' },
+    { id: 'zh-CN-YunzeNeural',       icon: 'mdi:hat-fedora', name: 'Yunze',     desc: 'Refined & calm', gender: 'male' },
+    { id: 'zh-CN-YunhaoNeural',      icon: 'mdi:microphone', name: 'Yunhao',    desc: 'Deep & rich', gender: 'male' },
+    { id: 'zh-CN-YunfengNeural',     icon: 'mdi:arm-flex', name: 'Yunfeng',   desc: 'Bold & decisive', gender: 'male' },
   ]},
-  // ===== 英文女声 =====
+  // ===== English Female =====
   { group: 'English Female', lang: 'en', voices: [
-    { id: 'English_expressive_narrator',    icon: 'mdi:book-open', name: 'Narrator',       desc: 'Expressive storyteller', gender: 'female' },
-    { id: 'English_radiant_girl',           icon: 'mdi:star-four-points', name: 'Radiant Girl',   desc: 'Bright and cheerful', gender: 'female' },
-    { id: 'English_compelling_lady',        icon: 'mdi:briefcase', name: 'Compelling Lady',desc: 'Professional tone', gender: 'female' },
-    { id: 'English_sweet_lady',             icon: 'mdi:flower', name: 'Sweet Lady',     desc: 'Gentle and warm', gender: 'female' },
-    { id: 'English_warm_woman',             icon: 'mdi:coffee', name: 'Warm Woman',     desc: 'Comforting voice', gender: 'female' },
-    { id: 'English_cute_girl',              icon: 'mdi:ribbon', name: 'Cute Girl',      desc: 'Adorable tone', gender: 'female' },
-    { id: 'English_lively_girl',            icon: 'mdi:party-popper', name: 'Lively Girl',    desc: 'Energetic vibe', gender: 'female' },
-    { id: 'English_confident_woman',        icon: 'mdi:account-tie', name: 'Confident Woman',desc: 'Strong presence', gender: 'female' },
+    { id: 'en-US-JennyNeural',       icon: 'mdi:star-four-points', name: 'Jenny',     desc: 'Friendly & warm', gender: 'female' },
+    { id: 'en-US-AriaNeural',        icon: 'mdi:flower', name: 'Aria',      desc: 'Expressive & clear', gender: 'female' },
+    { id: 'en-US-SaraNeural',        icon: 'mdi:ribbon', name: 'Sara',      desc: 'Gentle & soft', gender: 'female' },
+    { id: 'en-US-MichelleNeural',    icon: 'mdi:briefcase', name: 'Michelle', desc: 'Professional', gender: 'female' },
+    { id: 'en-GB-SoniaNeural',       icon: 'mdi:crown', name: 'Sonia (UK)',desc: 'British elegance', gender: 'female' },
+    { id: 'en-GB-LibbyNeural',       icon: 'mdi:coffee', name: 'Libby (UK)',desc: 'Warm British', gender: 'female' },
   ]},
-  // ===== 英文男声 =====
+  // ===== English Male =====
   { group: 'English Male', lang: 'en', voices: [
-    { id: 'English_magnetic_male',          icon: 'mdi:microphone', name: 'Magnetic Male',  desc: 'Deep and rich', gender: 'male' },
-    { id: 'English_calm_man',               icon: 'mdi:yoga', name: 'Calm Man',       desc: 'Soothing voice', gender: 'male' },
-    { id: 'English_gentle_man',             icon: 'mdi:hat-fedora', name: 'Gentleman',      desc: 'Refined tone', gender: 'male' },
-    { id: 'English_casual_guy',             icon: 'mdi:sunglasses', name: 'Casual Guy',     desc: 'Relaxed style', gender: 'male' },
-    { id: 'English_young_man',              icon: 'mdi:account', name: 'Young Man',      desc: 'Youthful energy', gender: 'male' },
-    { id: 'English_professional_man',       icon: 'mdi:tie', name: 'Professional',   desc: 'Business tone', gender: 'male' },
-    { id: 'English_storyteller',            icon: 'mdi:book-open-page-variant', name: 'Storyteller',    desc: 'Narrative voice', gender: 'male' },
-    { id: 'English_friendly_man',           icon: 'mdi:emoticon-happy', name: 'Friendly Man',   desc: 'Approachable', gender: 'male' },
+    { id: 'en-US-GuyNeural',         icon: 'mdi:emoticon-happy', name: 'Guy',       desc: 'Casual & clear', gender: 'male' },
+    { id: 'en-US-DavisNeural',       icon: 'mdi:microphone', name: 'Davis',     desc: 'Deep & composed', gender: 'male' },
+    { id: 'en-US-TonyNeural',        icon: 'mdi:sunglasses', name: 'Tony',      desc: 'Relaxed & natural', gender: 'male' },
+    { id: 'en-US-JasonNeural',       icon: 'mdi:tie', name: 'Jason',     desc: 'Business tone', gender: 'male' },
+    { id: 'en-GB-RyanNeural',        icon: 'mdi:hat-fedora', name: 'Ryan (UK)', desc: 'British gentleman', gender: 'male' },
+    { id: 'en-AU-WilliamNeural',     icon: 'mdi:weather-sunny', name: 'William (AU)',desc: 'Aussie friendly', gender: 'male' },
   ]},
 ];
 
-let currentSelectedVoice = 'Lovely_Girl';
+let currentSelectedVoice = 'en-US-EmmaMultilingualNeural';
 let currentFilter = 'all'; // all | zh | en
 let previewingVoice = null;
 
@@ -1290,7 +1243,7 @@ function renderVoiceList() {
           <div class="voice-name">${voice.name}</div>
           <div class="voice-desc">${voice.desc}</div>
         </div>
-        <button class="voice-preview-btn" data-voice="${voice.id}" title="试听">
+        <button class="voice-preview-btn" data-voice="${voice.id}" title="Preview">
           <span class="iconify" data-icon="mdi:play"></span>
         </button>
         ${voice.id === currentSelectedVoice ? '<span class="voice-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
@@ -1328,7 +1281,7 @@ async function previewVoice(voiceId, voiceName) {
   if (previewingVoice === voiceId) return;
 
   previewingVoice = voiceId;
-  const previewText = voiceId.startsWith('English') ? 'Hello! Nice to meet you.' : '你好，很高兴认识你！';
+  const previewText = voiceId.startsWith('zh-') ? '你好，很高兴认识你！' : 'Hello! Nice to meet you.';
 
   try {
     // 临时设置音色
@@ -1345,7 +1298,7 @@ async function previewVoice(voiceId, voiceName) {
     // 恢复原音色
     await window.electronAPI.tts.setVoice(currentSelectedVoice);
   } catch (e) {
-    console.error('[龙虾助手] 试听失败:', e);
+    console.error('[App] 试听失败:', e);
     previewingVoice = null;
     await window.electronAPI.tts.setVoice(currentSelectedVoice);
   }
@@ -1361,7 +1314,7 @@ async function selectVoice(voiceId) {
     const v = g.voices.find(v => v.id === voiceId);
     if (v) { voiceName = v.name; break; }
   }
-  showBubble(`音色已切换为「${escapeHtml(voiceName)}」`);
+  showBubble(`Voice switched to ${escapeHtml(voiceName)}`);
   setTimeout(() => {
     voicePanel.style.display = 'none';
   }, 600);
@@ -1410,7 +1363,7 @@ function renderCharacterList() {
     item.innerHTML = `
       <span class="character-icon"><span class="iconify" data-icon="${char.icon}"></span></span>
       <div class="character-info">
-        <div class="character-name">${char.name}${!isAvailable ? ' <span class="coming-soon">即将上线</span>' : ''}</div>
+        <div class="character-name">${char.name}${!isAvailable ? ' <span class="coming-soon">Coming soon</span>' : ''}</div>
         <div class="character-desc">${char.desc}</div>
       </div>
       ${char.id === currentCharacter.id ? '<span class="character-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
@@ -1432,7 +1385,7 @@ async function switchCharacter(characterId) {
   const newChar = CHARACTER_PROFILES[characterId];
   if (!newChar || newChar.id === currentCharacter.id) return;
 
-  console.log(`[角色切换] ${currentCharacter.name} → ${newChar.name}`);
+  console.log(`[Character] ${currentCharacter.name} → ${newChar.name}`);
 
   // 更新角色
   currentCharacter = newChar;
@@ -1453,7 +1406,7 @@ async function switchCharacter(characterId) {
   characterPanel.style.display = 'none';
 
   // 显示切换提示
-  showBubble(`已切换为「${escapeHtml(newChar.name)}」`);
+  showBubble(`Switched to ${escapeHtml(newChar.name)}`);
 
   // 重新播放欢迎动画
   isFirstLaunch = true;
@@ -1488,7 +1441,7 @@ function initMiniMode() {
 
   // 单击悬浮球 = 开始/停止聆听；双击悬浮球 = 恢复大窗口
   miniOrb.addEventListener('click', (e) => {
-    console.log('[悬浮球] 点击事件触发, isMiniMode:', isMiniMode, 'target:', e.target.className);
+    console.log('[Orb] 点击事件触发, isMiniMode:', isMiniMode, 'target:', e.target.className);
     // 点击放大按钮时不处理
     if (e.target.closest('.mini-expand-btn')) return;
 
@@ -1496,13 +1449,13 @@ function initMiniMode() {
       // 双击：恢复大窗口
       clearTimeout(miniOrbClickTimer);
       miniOrbClickTimer = null;
-      console.log('[悬浮球] 双击 → 恢复大窗口');
+      console.log('[Orb] 双击 → 恢复大窗口');
       window.electronAPI.restoreWindow();
     } else {
       // 等待判断是否双击
       miniOrbClickTimer = setTimeout(() => {
         miniOrbClickTimer = null;
-        console.log('[悬浮球] 单击 → 切换聆听');
+        console.log('[Orb] 单击 → 切换聆听');
         // 单击：切换聆听
         onMiniOrbTap();
       }, 250);
@@ -1521,7 +1474,7 @@ function initMiniMode() {
 
 // 悬浮球单击 → 开始/停止聆听
 async function onMiniOrbTap() {
-  console.log('[悬浮球] onMiniOrbTap, isMiniMode:', isMiniMode, 'appState:', appState, 'isProcessing:', isProcessing);
+  console.log('[Orb] onMiniOrbTap, isMiniMode:', isMiniMode, 'appState:', appState, 'isProcessing:', isProcessing);
   if (!isMiniMode) return;
 
   // speaking 状态下允许打断 → 直接进入聆听
@@ -1575,7 +1528,7 @@ function setMiniOrbState(state) {
 }
 
 function enterMiniMode() {
-  console.log('[悬浮球] 进入迷你模式');
+  console.log('[Orb] 进入迷你模式');
   isMiniMode = true;
   widgetContainer.style.display = 'none';
   miniOrb.style.display = 'flex';
@@ -1584,7 +1537,7 @@ function enterMiniMode() {
 }
 
 function exitMiniMode() {
-  console.log('[悬浮球] 退出迷你模式，恢复完整窗口');
+  console.log('[Orb] 退出迷你模式，恢复完整窗口');
   isMiniMode = false;
   miniOrb.style.display = 'none';
   miniOrb.classList.remove('mini-listening', 'mini-thinking', 'mini-speaking');

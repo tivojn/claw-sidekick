@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-assistant",
+  "name": "claw-sidekick",
   "version": "0.1.0",
-  "description": "OpenClaw Desktop Assistant - AI Voice Assistant",
+  "description": "Claw Sidekick - AI Desktop Assistant with TTS",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -14,9 +14,10 @@
     "openclaw",
     "assistant",
     "ai",
-    "voice"
+    "tts",
+    "claw-sidekick"
   ],
-  "author": "OpenClaw",
+  "author": "tivojn",
   "license": "MIT",
   "devDependencies": {
     "electron": "^28.0.0",
@@ -28,9 +29,9 @@
     "ws": "^8.19.0"
   },
   "build": {
-    "appId": "com.openclaw.assistant",
-    "productName": "OpenClaw Assistant",
-    "copyright": "Copyright © 2024 OpenClaw",
+    "appId": "com.clawsidekick.app",
+    "productName": "Claw Sidekick",
+    "copyright": "Copyright © 2025 tivojn",
     "directories": {
       "output": "dist",
       "buildResources": "build"
