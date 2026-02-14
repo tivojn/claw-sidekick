@@ -1676,7 +1676,7 @@ function codeToLabel(code) {
 
 function comboToLabel(combo) {
   const c = combo.code || combo.key || 'fn'; // backward compat
-  if (c === 'fn') return 'fn';
+  if (c === 'fn') return 'Fn (hold)';
   const parts = [];
   if (combo.ctrl) parts.push('Ctrl');
   if (combo.alt) parts.push('Opt');
@@ -1688,7 +1688,7 @@ function comboToLabel(combo) {
 
 function comboToShortLabel(combo) {
   const c = combo.code || combo.key || 'fn';
-  if (c === 'fn') return 'fn';
+  if (c === 'fn') return 'Fn';
   const parts = [];
   if (combo.ctrl) parts.push('Ctrl');
   if (combo.alt) parts.push('Opt');
@@ -1779,9 +1779,9 @@ document.addEventListener('keydown', (e) => {
   if (document.activeElement === textInput) return;
 
   const cc = comboCode(pttCombo);
-  if (cc === 'fn') return; // fn can't be detected via JS
 
-  const codeMatch = e.code === cc;
+  // Fn/Globe key: match via e.key since e.code may vary
+  const codeMatch = cc === 'fn' ? (e.key === 'Fn' || e.key === 'fn') : e.code === cc;
   const modMatch = (!!e.ctrlKey === !!pttCombo.ctrl) &&
                    (!!e.altKey === !!pttCombo.alt) &&
                    (!!e.shiftKey === !!pttCombo.shift) &&
