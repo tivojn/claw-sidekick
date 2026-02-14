@@ -93,7 +93,7 @@ const CHARACTER_PROFILES = {
   },
   cat: {
     id: 'cat',
-    name: 'Cat',
+    name: 'Zane',
     desc: 'Chill & curious cat helper',
     icon: 'mdi:cat',
     welcomeText: "Meow! Hey there, need a paw with something?",
@@ -121,7 +121,7 @@ const CHARACTER_PROFILES = {
       thinking: { r: 255, g: 213, b: 79 },
       speaking: { r: 171, g: 130, b: 255 }
     },
-    defaultVoice: 'zh-CN-XiaomengNeural'
+    defaultVoice: 'en-US-BrianMultilingualNeural'
   },
   robot: {
     id: 'robot',
@@ -153,7 +153,7 @@ const CHARACTER_PROFILES = {
       thinking: { r: 255, g: 200, b: 0 },
       speaking: { r: 0, g: 150, b: 255 }
     },
-    defaultVoice: 'zh-CN-YunjianNeural'
+    defaultVoice: 'en-US-BrianMultilingualNeural'
   }
 };
 
