@@ -83,8 +83,8 @@ class TaskManager {
     task.startedAt = Date.now();
 
     try {
-      // 调用 Clawdbot
-      const result = await chatWithClawdbot(task.message);
+      // 调用 AI (OpenClaw or Claude Code)
+      const result = await executeAICommand(task.message);
 
       task.status = 'completed';
       task.result = result;
@@ -592,6 +592,46 @@ async function chatWithClawdbot(message) {
   }
 }
 
+// ===== Claude Code CLI =====
+async function chatWithClaudeCode(message) {
+  return new Promise((resolve, reject) => {
+    const claudePath = appSettings.connection?.claudeCodePath || 'claude';
+    console.log(`[ClaudeCode] Spawning: ${claudePath} --print "${message.substring(0, 50)}..."`);
+    const shellPath = process.env.PATH + ':/opt/homebrew/bin:/usr/local/bin';
+    const child = require('child_process').spawn(claudePath, ['--print', message], {
+      env: { ...process.env, PATH: shellPath },
+      timeout: 120000
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => { stdout += data.toString(); });
+    child.stderr.on('data', (data) => { stderr += data.toString(); });
+    child.on('close', (code) => {
+      if (code === 0) {
+        console.log(`[ClaudeCode] Response: ${stdout.substring(0, 200)}`);
+        resolve(stdout.trim());
+      } else {
+        console.error(`[ClaudeCode] Exit code ${code}: ${stderr}`);
+        reject(new Error(stderr || `Claude Code exited with code ${code}`));
+      }
+    });
+    child.on('error', (err) => {
+      console.error(`[ClaudeCode] Spawn error: ${err.message}`);
+      reject(err);
+    });
+  });
+}
+
+// ===== AI Command Router =====
+async function executeAICommand(command) {
+  const provider = appSettings.connection?.provider || 'openclaw';
+  console.log(`[AI Router] Provider: ${provider}`);
+  if (provider === 'claude-code') {
+    return chatWithClaudeCode(command);
+  }
+  return chatWithClawdbot(command);
+}
+
 // ===== 窗口创建 =====
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -637,19 +677,18 @@ function createWindow() {
 // ===== 命令处理（通过 Clawdbot） =====
 ipcMain.handle('openclaw:executeCommand', async (event, command) => {
   console.log('[CMD] 收到命令:', command);
+  const provider = appSettings.connection?.provider || 'openclaw';
 
   try {
-    const reply = await chatWithClawdbot(command);
-    console.log(`[CMD] Clawdbot 回复: ${reply}`);
+    const reply = await executeAICommand(command);
+    console.log(`[CMD] ${provider} 回复: ${reply}`);
     return { type: 'chat', data: null, message: reply };
   } catch (error) {
-    console.error('[CMD] Clawdbot 调用失败:', error.message);
-    // 降级处理：返回友好提示
-    return {
-      type: 'chat',
-      data: null,
-      message: 'Clawdbot is temporarily unavailable. Make sure the service is running.'
-    };
+    console.error(`[CMD] ${provider} 调用失败:`, error.message);
+    const hint = provider === 'claude-code'
+      ? 'Claude Code CLI is unavailable. Make sure `claude` is installed and accessible.'
+      : 'Clawdbot is temporarily unavailable. Make sure the service is running.';
+    return { type: 'chat', data: null, message: hint };
   }
 });
 
@@ -671,6 +710,41 @@ ipcMain.handle('task:getAll', async (event) => {
 ipcMain.handle('task:cancel', async (event, taskId) => {
   const success = taskManager.cancelTask(taskId);
   return { success };
+});
+
+// ===== Connection Provider =====
+ipcMain.handle('connection:setProvider', (event, provider) => {
+  appSettings.connection = appSettings.connection || {};
+  appSettings.connection.provider = provider;
+  saveSettings();
+  console.log(`[Connection] Provider set to: ${provider}`);
+  return { success: true };
+});
+
+ipcMain.handle('connection:getProvider', () => {
+  return { provider: appSettings.connection?.provider || 'openclaw' };
+});
+
+ipcMain.handle('connection:setClaudeCodePath', (event, cliPath) => {
+  appSettings.connection = appSettings.connection || {};
+  appSettings.connection.claudeCodePath = cliPath;
+  saveSettings();
+  console.log(`[Connection] Claude Code path set to: ${cliPath}`);
+  return { success: true };
+});
+
+ipcMain.handle('connection:validateClaudeCode', async () => {
+  try {
+    const claudePath = appSettings.connection?.claudeCodePath || 'claude';
+    const { execSync } = require('child_process');
+    const shellPath = process.env.PATH + ':/opt/homebrew/bin:/usr/local/bin';
+    const version = execSync(`${claudePath} --version`, { timeout: 5000, env: { ...process.env, PATH: shellPath } }).toString().trim();
+    console.log(`[Connection] Claude Code validated: ${version}`);
+    return { valid: true, version };
+  } catch (e) {
+    console.error(`[Connection] Claude Code validation failed: ${e.message}`);
+    return { valid: false, error: e.message };
+  }
 });
 
 // ===== Deepgram STT =====

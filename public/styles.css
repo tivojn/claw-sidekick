@@ -626,7 +626,7 @@ body.mini-mode html {
 .bottom-panel {
   width: 100%;
   overflow: hidden;
-  max-height: clamp(90px, 25vh, 150px);
+  max-height: clamp(140px, 50vh, 320px);
   transition: max-height 0.3s ease, opacity 0.3s ease;
   opacity: 1;
   background: rgba(255, 255, 255, 0.7);
@@ -656,6 +656,50 @@ body.mini-mode html {
   width: 100%;
   padding: clamp(4px, 1.5vw, 8px) clamp(8px, 3vw, 16px) clamp(2px, 0.8vw, 4px);
   -webkit-app-region: no-drag;
+}
+
+/* ===== Chat log ===== */
+.chat-log {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  -webkit-app-region: no-drag;
+}
+.chat-log:empty {
+  display: none;
+}
+.chat-log::-webkit-scrollbar { display: none; }
+
+.chat-msg {
+  max-width: 85%;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.chat-msg-user {
+  align-self: flex-end;
+  background: rgba(129, 140, 248, 0.15);
+  color: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(129, 140, 248, 0.2);
+}
+.chat-msg-assistant {
+  align-self: flex-start;
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.chat-msg-time {
+  font-size: 9px;
+  color: rgba(100, 116, 139, 0.5);
+  margin-top: 1px;
+}
+.chat-msg-user .chat-msg-time {
+  text-align: right;
 }
 
 /* ===== 文本输入区域 ===== */
@@ -2229,4 +2273,12 @@ body.mini-mode html {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.4);
   flex-shrink: 0;
+}
+
+.settings-claude-code-config {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }

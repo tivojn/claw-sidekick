@@ -97,6 +97,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  // Connection provider management (OpenClaw / Claude Code)
+  connection: {
+    setProvider: (provider) => ipcRenderer.invoke('connection:setProvider', provider),
+    getProvider: () => ipcRenderer.invoke('connection:getProvider'),
+    setClaudeCodePath: (path) => ipcRenderer.invoke('connection:setClaudeCodePath', path),
+    validateClaudeCode: () => ipcRenderer.invoke('connection:validateClaudeCode')
+  },
+
   // STT provider management (Deepgram / Groq Whisper)
   stt: {
     setProvider: (provider) => ipcRenderer.invoke('stt:setProvider', provider),

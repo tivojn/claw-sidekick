@@ -221,13 +221,23 @@
                 <span class="iconify" data-icon="mdi:check-circle"></span>
               </span>
             </div>
-            <div class="settings-connection-item disabled" data-connection="claude-code">
+            <div class="settings-connection-item" data-connection="claude-code">
               <span class="connection-icon"><span class="iconify" data-icon="mdi:console"></span></span>
               <div class="connection-info">
                 <div class="connection-name">Claude Code</div>
-                <div class="connection-desc">Coming soon</div>
+                <div class="connection-desc">Claude CLI assistant</div>
               </div>
-              <span class="connection-badge">Soon</span>
+              <span class="connection-status" id="claude-code-conn-status"></span>
+            </div>
+          </div>
+          <div class="settings-claude-code-config" id="settings-claude-code-config" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">CLI Path</span>
+              <div class="settings-key-input-row">
+                <input type="text" class="settings-input" id="claude-code-path" placeholder="claude (default)" />
+                <button class="settings-key-save" id="claude-code-validate">Test</button>
+              </div>
+              <div class="settings-key-status" id="claude-code-status"></div>
             </div>
           </div>
         </div>

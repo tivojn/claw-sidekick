@@ -18,6 +18,7 @@ let lastAIResponse = '';
 let countdownInterval = null;
 let groqAudioChunks = [];
 let useGroqSTT = false;
+const chatHistory = [];
 
 // ===== Character Profiles =====
 const CHARACTER_PROFILES = {
@@ -192,6 +193,34 @@ const tapHint = document.getElementById('tap-hint');
 const listeningPulseRing = document.getElementById('listening-pulse-ring');
 const foldToggle = document.getElementById('fold-toggle');
 const bottomPanel = document.getElementById('bottom-panel');
+const chatLogEl = document.getElementById('chat-log');
+
+// ===== Chat history =====
+function addChatMessage(role, text) {
+  const now = new Date();
+  chatHistory.push({ role, text, timestamp: now });
+  // Keep limited to 50 messages
+  if (chatHistory.length > 50) chatHistory.shift();
+
+  const div = document.createElement('div');
+  div.className = 'chat-msg chat-msg-' + role;
+
+  const truncated = text.length > 100 ? text.substring(0, 100) + '...' : text;
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  div.innerHTML =
+    '<div class="chat-msg-text">' + escapeHtml(truncated) + '</div>' +
+    '<div class="chat-msg-time">' + timeStr + '</div>';
+
+  chatLogEl.appendChild(div);
+
+  // Remove old DOM nodes to match 50 limit
+  while (chatLogEl.children.length > 50) {
+    chatLogEl.removeChild(chatLogEl.firstChild);
+  }
+
+  chatLogEl.scrollTop = chatLogEl.scrollHeight;
+}
 
 // ===== Avatar visibility (hide during settings panels) =====
 function setAvatarVisible(visible) {
@@ -805,6 +834,11 @@ async function processAudioQueue() {
   isPlayingQueue = false;
   isSpeaking = false;
 
+  // Log the full streamed response to chat history
+  if (streamingTextBuffer) {
+    addChatMessage('assistant', streamingTextBuffer);
+  }
+
   // TTS 播放完毕，回到 idle
   // Always reset isProcessing when streaming finishes to prevent stuck state
   if (appState === 'speaking' || isProcessing) {
@@ -1048,6 +1082,8 @@ async function onLobsterClick() {
 async function handleCommand(command) {
   if (isProcessing) return;
 
+  addChatMessage('user', command);
+
   // 检测是否是异步任务
   const asyncKeywords = ['later', 'when done', 'let me know', 'notify me', 'tell me when', 'in the background'];
   const isAsyncTask = asyncKeywords.some(keyword => command.includes(keyword));
@@ -1087,6 +1123,7 @@ async function handleAsyncTask(command) {
       ];
       const feedback = feedbackMessages[Math.floor(Math.random() * feedbackMessages.length)];
 
+      addChatMessage('assistant', feedback);
       showBubble(feedback);
       await playTextToSpeech(feedback);
 
@@ -1140,6 +1177,7 @@ async function handleSyncTask(command, isGoodbye) {
     // (streamingChunksReceived tracks this to avoid race conditions with slow TTS providers)
     if (streamingChunksReceived === 0 && audioQueue.length === 0 && !isPlayingQueue) {
       // No streaming audio received — use traditional TTS
+      addChatMessage('assistant', cleanedMessage);
       setAppState('speaking');
       showBubbleWithViewBtn(cleanedMessage);
       await playTextToSpeech(cleanedMessage);
@@ -1908,6 +1946,15 @@ async function openGlobalSettingsPanel() {
   // Update hotkey
   updateHotkeyUI();
 
+  // Load connection provider state
+  try {
+    const conn = await window.electronAPI.connection.getProvider();
+    const activeProvider = conn.provider || 'openclaw';
+    updateConnectionUI(activeProvider);
+  } catch (e) {
+    updateConnectionUI('openclaw');
+  }
+
   panel.style.display = 'flex';
   onPanelOpen();
 }
@@ -1917,6 +1964,46 @@ function closeGlobalSettingsPanel() {
   if (panel) panel.style.display = 'none';
   stopCapturing();
   onPanelClose();
+}
+
+// Update connection item UI to reflect active provider
+function updateConnectionUI(activeProvider) {
+  const items = document.querySelectorAll('.settings-connection-item');
+  items.forEach(item => {
+    const conn = item.dataset.connection;
+    item.classList.toggle('active', conn === activeProvider);
+  });
+
+  // Show/hide Claude Code config
+  const ccConfig = document.getElementById('settings-claude-code-config');
+  if (ccConfig) ccConfig.style.display = activeProvider === 'claude-code' ? '' : 'none';
+
+  // Update OpenClaw status icon
+  const openclawItem = document.querySelector('[data-connection="openclaw"]');
+  if (openclawItem) {
+    const statusEl = openclawItem.querySelector('.connection-status');
+    if (statusEl) {
+      if (activeProvider === 'openclaw') {
+        statusEl.className = 'connection-status connected';
+        statusEl.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+      } else {
+        statusEl.className = 'connection-status';
+        statusEl.innerHTML = '';
+      }
+    }
+  }
+
+  // Update Claude Code status icon
+  const ccStatusEl = document.getElementById('claude-code-conn-status');
+  if (ccStatusEl) {
+    if (activeProvider === 'claude-code') {
+      ccStatusEl.className = 'connection-status connected';
+      ccStatusEl.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+    } else {
+      ccStatusEl.className = 'connection-status';
+      ccStatusEl.innerHTML = '';
+    }
+  }
 }
 
 function updateSettingsPills(containerId, dataAttr, activeValue) {
@@ -2283,6 +2370,57 @@ document.addEventListener('DOMContentLoaded', () => {
         if (status) { status.textContent = 'Failed: ' + err.message; status.className = 'settings-key-status error'; }
       } finally {
         groqSave.classList.remove('validating');
+      }
+    });
+  }
+
+  // Connection items click handlers
+  const connItems = document.querySelectorAll('.settings-connection-item');
+  connItems.forEach(item => {
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const provider = item.dataset.connection;
+      if (!provider) return;
+      await window.electronAPI.connection.setProvider(provider);
+      updateConnectionUI(provider);
+    });
+  });
+
+  // Claude Code validate button
+  const ccValidateBtn = document.getElementById('claude-code-validate');
+  if (ccValidateBtn) {
+    ccValidateBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pathInput = document.getElementById('claude-code-path');
+      const status = document.getElementById('claude-code-status');
+      const cliPath = pathInput ? pathInput.value.trim() : '';
+
+      // Save path first (even if empty, backend uses default 'claude')
+      if (cliPath) {
+        await window.electronAPI.connection.setClaudeCodePath(cliPath);
+      }
+
+      if (status) { status.textContent = 'Testing...'; status.className = 'settings-key-status'; }
+      try {
+        const result = await window.electronAPI.connection.validateClaudeCode();
+        if (result.valid) {
+          if (status) { status.textContent = result.version; status.className = 'settings-key-status success'; }
+        } else {
+          if (status) { status.textContent = result.error || 'Not found'; status.className = 'settings-key-status error'; }
+        }
+      } catch (err) {
+        if (status) { status.textContent = 'Failed: ' + err.message; status.className = 'settings-key-status error'; }
+      }
+    });
+  }
+
+  // Claude Code path input - save on Enter
+  const ccPathInput = document.getElementById('claude-code-path');
+  if (ccPathInput) {
+    ccPathInput.addEventListener('keypress', async (e) => {
+      if (e.key === 'Enter') {
+        const cliPath = ccPathInput.value.trim();
+        if (cliPath) await window.electronAPI.connection.setClaudeCodePath(cliPath);
       }
     });
   }
