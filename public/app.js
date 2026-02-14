@@ -334,6 +334,7 @@ const listeningPulseRing = document.getElementById('listening-pulse-ring');
 const foldToggle = document.getElementById('fold-toggle');
 const bottomPanel = document.getElementById('bottom-panel');
 const chatLogEl = document.getElementById('chat-log');
+if (chatLogEl) chatLogEl.classList.add('no-messages');
 
 // ===== Chat log resize handles (top + bottom) =====
 (function initChatLogResize() {
@@ -396,6 +397,7 @@ const chatLogEl = document.getElementById('chat-log');
 // ===== Chat history =====
 function addChatMessage(role, text) {
   if (!chatLogEl) return;
+  chatLogEl.classList.remove('no-messages');
   const now = new Date();
   chatHistory.push({ role, text, timestamp: now });
   if (chatHistory.length > 50) chatHistory.shift();
@@ -1570,9 +1572,59 @@ async function initVoice() {
 // ===== Avatar Carousel =====
 const characterKeys = Object.keys(CHARACTER_PROFILES);
 const avatarNameLabel = document.getElementById('avatar-name-label');
+const carouselDotsEl = document.getElementById('carousel-dots');
+
+// Build dot indicators
+(function initCarouselDots() {
+  if (!carouselDotsEl) return;
+  characterKeys.forEach((key, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'carousel-dot' + (CHARACTER_PROFILES[key].id === currentCharacter.id ? ' active' : '');
+    dot.title = CHARACTER_PROFILES[key].name;
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      switchCharacter(key);
+    });
+    carouselDotsEl.appendChild(dot);
+  });
+})();
+
+function updateCarouselUI() {
+  if (avatarNameLabel) avatarNameLabel.textContent = currentCharacter.name;
+  if (carouselDotsEl) {
+    const dots = carouselDotsEl.querySelectorAll('.carousel-dot');
+    const activeIdx = characterKeys.indexOf(currentCharacter.id);
+    dots.forEach((dot, i) => dot.classList.toggle('active', i === activeIdx));
+  }
+}
+
+// Swipe gesture on avatar area
+(function initSwipeGesture() {
+  const area = document.getElementById('lobster-area');
+  if (!area) return;
+  let startX = 0, startY = 0, swiping = false;
+  area.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.tap-hint, .carousel-arrow, .carousel-dot, .chat-log, .chat-log-resize')) return;
+    startX = e.clientX;
+    startY = e.clientY;
+    swiping = true;
+  });
+  area.addEventListener('pointermove', (e) => {
+    if (!swiping) return;
+    const dx = e.clientX - startX;
+    const dy = Math.abs(e.clientY - startY);
+    if (Math.abs(dx) > 50 && dy < 80) {
+      swiping = false;
+      if (dx < 0) carouselNext();
+      else carouselPrev();
+    }
+  });
+  area.addEventListener('pointerup', () => { swiping = false; });
+  area.addEventListener('pointercancel', () => { swiping = false; });
+})();
 
 function updateAvatarNameLabel() {
-  if (avatarNameLabel) avatarNameLabel.textContent = currentCharacter.name;
+  updateCarouselUI();
 }
 
 function carouselPrev() {

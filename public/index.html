@@ -31,15 +31,19 @@
       <canvas id="live2d-canvas"></canvas>
       <video id="video-avatar" class="video-avatar" autoplay loop muted playsinline></video>
       <canvas id="video-avatar-canvas"></canvas>
-      <!-- Avatar carousel nav arrows -->
-      <button class="avatar-nav avatar-prev" id="avatar-prev" title="Previous character">
-        <span class="iconify" data-icon="mdi:chevron-left"></span>
-      </button>
-      <button class="avatar-nav avatar-next" id="avatar-next" title="Next character">
-        <span class="iconify" data-icon="mdi:chevron-right"></span>
-      </button>
-      <!-- Avatar name label -->
-      <div class="avatar-name-label" id="avatar-name-label">Octavia</div>
+      <!-- Avatar carousel bar -->
+      <div class="avatar-carousel-bar" id="avatar-carousel-bar">
+        <button class="carousel-arrow carousel-arrow-left" id="avatar-prev" title="Previous character">
+          <span class="iconify" data-icon="mdi:chevron-left"></span>
+        </button>
+        <div class="carousel-center">
+          <div class="avatar-name-label" id="avatar-name-label">Octavia</div>
+          <div class="carousel-dots" id="carousel-dots"></div>
+        </div>
+        <button class="carousel-arrow carousel-arrow-right" id="avatar-next" title="Next character">
+          <span class="iconify" data-icon="mdi:chevron-right"></span>
+        </button>
+      </div>
       <!-- Push to Talk button -->
       <div class="tap-hint" id="tap-hint">
         <span class="iconify tap-icon" data-icon="mdi:microphone"></span>

@@ -722,6 +722,9 @@ body.mini-mode html {
 .chat-log:empty {
   display: none;
 }
+.chat-log.no-messages {
+  display: none;
+}
 .chat-log::-webkit-scrollbar { display: none; }
 
 .chat-log-resize {
@@ -2286,59 +2289,91 @@ body.mini-mode html {
   margin-top: 4px;
 }
 
-/* ===== Avatar Carousel Nav Arrows ===== */
-.avatar-nav {
+/* ===== Avatar Carousel Bar (bottom pill) ===== */
+.avatar-carousel-bar {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: clamp(68px, 14vh, 95px);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 15;
-  width: 38px;
-  height: 60px;
-  border: 1.5px solid rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  color: rgba(255, 255, 255, 0.85);
-  font-size: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  background: rgba(30, 30, 50, 0.4);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  -webkit-app-region: no-drag;
+  transition: opacity 0.3s;
+}
+
+.carousel-arrow {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
-  -webkit-app-region: no-drag;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.15s ease;
+  padding: 0;
+  flex-shrink: 0;
 }
-.avatar-nav:hover {
-  background: rgba(0, 0, 0, 0.4);
-  border-color: rgba(255, 255, 255, 0.5);
-  color: #ffffff;
-  transform: translateY(-50%) scale(1.08);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+.carousel-arrow:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
-.avatar-nav:active {
-  transform: translateY(-50%) scale(0.95);
-}
-.avatar-prev {
-  left: 6px;
-}
-.avatar-next {
-  right: 6px;
+.carousel-arrow:active {
+  transform: scale(0.88);
 }
 
-/* Avatar name label */
+.carousel-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 40px;
+}
+
 .avatar-name-label {
-  position: absolute;
-  top: clamp(8px, 2vw, 14px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 15;
-  font-size: clamp(11px, 2.5vw, 14px);
+  font-size: 10px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.75);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
-  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
   pointer-events: none;
+  line-height: 1;
+}
+
+.carousel-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.carousel-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  transition: all 0.25s ease;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+.carousel-dot.active {
+  width: 12px;
+  border-radius: 2.5px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.carousel-dot:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.5);
 }
 
 /* ===== Connection Manager ===== */
