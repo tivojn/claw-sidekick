@@ -472,8 +472,15 @@ function addChatMessage(role, text) {
 function setAvatarVisible(visible) {
   const live2dCanvas = document.getElementById('live2d-canvas');
   const auraCanvas = document.getElementById('aura-canvas');
-  if (live2dCanvas) live2dCanvas.style.display = visible ? '' : 'none';
-  if (auraCanvas) auraCanvas.style.display = visible ? '' : 'none';
+  // Use visibility instead of display to preserve PIXI WebGL context & canvas dimensions
+  if (live2dCanvas) {
+    live2dCanvas.style.visibility = visible ? '' : 'hidden';
+    live2dCanvas.style.pointerEvents = visible ? '' : 'none';
+  }
+  if (auraCanvas) {
+    auraCanvas.style.visibility = visible ? '' : 'hidden';
+    auraCanvas.style.pointerEvents = visible ? '' : 'none';
+  }
 }
 
 function isAnyPanelOpen() {
@@ -2310,18 +2317,10 @@ function updateConnectionUI(activeProvider) {
   items.forEach(item => {
     const conn = item.dataset.connection;
     item.classList.toggle('active', conn === activeProvider);
-  });
-
-  // Show/hide Claude Code config
-  const ccConfig = document.getElementById('settings-claude-code-config');
-  if (ccConfig) ccConfig.style.display = activeProvider === 'claude-code' ? '' : 'none';
-
-  // Update OpenClaw status icon
-  const openclawItem = document.querySelector('[data-connection="openclaw"]');
-  if (openclawItem) {
-    const statusEl = openclawItem.querySelector('.connection-status');
+    // Update status icon for the active item
+    const statusEl = item.querySelector('.connection-status');
     if (statusEl) {
-      if (activeProvider === 'openclaw') {
+      if (conn === activeProvider) {
         statusEl.className = 'connection-status connected';
         statusEl.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
       } else {
@@ -2329,18 +2328,69 @@ function updateConnectionUI(activeProvider) {
         statusEl.innerHTML = '';
       }
     }
-  }
+  });
 
-  // Update Claude Code status icon
-  const ccStatusEl = document.getElementById('claude-code-conn-status');
-  if (ccStatusEl) {
-    if (activeProvider === 'claude-code') {
-      ccStatusEl.className = 'connection-status connected';
-      ccStatusEl.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+  // Hide all provider config panels, show the active one
+  const configIds = {
+    'claude-code': 'settings-claude-code-config',
+    'openai': 'settings-openai-config',
+    'gemini': 'settings-gemini-config',
+    'anthropic': 'settings-anthropic-config',
+    'ollama': 'settings-ollama-config'
+  };
+  Object.entries(configIds).forEach(([provider, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = provider === activeProvider ? '' : 'none';
+  });
+}
+
+// Populate a model select dropdown
+function populateModelSelect(selectId, models, currentModel) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = '';
+  models.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.name || m.id;
+    if (m.id === currentModel) opt.selected = true;
+    select.appendChild(opt);
+  });
+  // Show the model row
+  const row = select.closest('.settings-row');
+  if (row) row.style.display = '';
+}
+
+// Generic key validation flow for API providers
+async function validateProviderKey(provider, apiKey, statusElId) {
+  const statusEl = document.getElementById(statusElId);
+  if (statusEl) { statusEl.textContent = 'Validating...'; statusEl.className = 'settings-key-status'; }
+  try {
+    let result;
+    if (provider === 'openai') result = await window.electronAPI.connection.validateOpenAI(apiKey);
+    else if (provider === 'gemini') result = await window.electronAPI.connection.validateGemini(apiKey);
+    else if (provider === 'anthropic') result = await window.electronAPI.connection.validateAnthropic(apiKey);
+
+    if (result && result.success) {
+      if (statusEl) { statusEl.textContent = `${result.models.length} models available`; statusEl.className = 'settings-key-status success'; }
+      // Populate model dropdown
+      const selectId = `${provider}-model-select`;
+      const savedModel = result.models.find(m => m.id === (provider === 'openai' ? 'gpt-4o' : provider === 'gemini' ? 'gemini-2.0-flash' : 'claude-sonnet-4-5-20250929'));
+      populateModelSelect(selectId, result.models, savedModel ? savedModel.id : result.models[0]?.id);
+      // Update connection status icon
+      const connStatus = document.getElementById(`${provider}-conn-status`);
+      if (connStatus) {
+        connStatus.className = 'connection-status connected';
+        connStatus.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+      }
+      return true;
     } else {
-      ccStatusEl.className = 'connection-status';
-      ccStatusEl.innerHTML = '';
+      if (statusEl) { statusEl.textContent = result?.error || 'Invalid key'; statusEl.className = 'settings-key-status error'; }
+      return false;
     }
+  } catch (err) {
+    if (statusEl) { statusEl.textContent = err.message; statusEl.className = 'settings-key-status error'; }
+    return false;
   }
 }
 
@@ -2760,6 +2810,113 @@ document.addEventListener('DOMContentLoaded', () => {
         const cliPath = ccPathInput.value.trim();
         if (cliPath) await window.electronAPI.connection.setClaudeCodePath(cliPath);
       }
+    });
+  }
+
+  // OpenAI key save
+  const openaiSave = document.getElementById('openai-key-save');
+  if (openaiSave) {
+    openaiSave.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const keyInput = document.getElementById('openai-key');
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      if (!apiKey) return;
+      await validateProviderKey('openai', apiKey, 'openai-key-status');
+    });
+  }
+
+  // OpenAI model change
+  const openaiModelSelect = document.getElementById('openai-model-select');
+  if (openaiModelSelect) {
+    openaiModelSelect.addEventListener('change', async () => {
+      await window.electronAPI.connection.setModel('openai', openaiModelSelect.value);
+    });
+  }
+
+  // OpenAI OAuth button
+  const openaiOAuthBtn = document.getElementById('openai-oauth-btn');
+  if (openaiOAuthBtn) {
+    openaiOAuthBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await window.electronAPI.connection.startOAuth('openai');
+    });
+  }
+
+  // Gemini key save
+  const geminiSave = document.getElementById('gemini-key-save');
+  if (geminiSave) {
+    geminiSave.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const keyInput = document.getElementById('gemini-key');
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      if (!apiKey) return;
+      await validateProviderKey('gemini', apiKey, 'gemini-key-status');
+    });
+  }
+
+  // Gemini model change
+  const geminiModelSelect = document.getElementById('gemini-model-select');
+  if (geminiModelSelect) {
+    geminiModelSelect.addEventListener('change', async () => {
+      await window.electronAPI.connection.setModel('gemini', geminiModelSelect.value);
+    });
+  }
+
+  // Anthropic key save
+  const anthropicSave = document.getElementById('anthropic-key-save');
+  if (anthropicSave) {
+    anthropicSave.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const keyInput = document.getElementById('anthropic-key');
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      if (!apiKey) return;
+      await validateProviderKey('anthropic', apiKey, 'anthropic-key-status');
+    });
+  }
+
+  // Anthropic model change
+  const anthropicModelSelect = document.getElementById('anthropic-model-select');
+  if (anthropicModelSelect) {
+    anthropicModelSelect.addEventListener('change', async () => {
+      await window.electronAPI.connection.setModel('anthropic', anthropicModelSelect.value);
+    });
+  }
+
+  // Ollama detect
+  const ollamaDetectBtn = document.getElementById('ollama-detect-btn');
+  if (ollamaDetectBtn) {
+    ollamaDetectBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const label = document.getElementById('ollama-detect-label');
+      const status = document.getElementById('ollama-key-status');
+      if (label) label.textContent = 'Detecting...';
+      try {
+        const result = await window.electronAPI.connection.validateOllama();
+        if (result.success) {
+          if (label) label.textContent = `Running (${result.models.length} models)`;
+          if (status) { status.textContent = ''; status.className = 'settings-key-status'; }
+          populateModelSelect('ollama-model-select', result.models, result.models[0]?.id);
+          const connStatus = document.getElementById('ollama-conn-status');
+          if (connStatus) {
+            connStatus.className = 'connection-status connected';
+            connStatus.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+          }
+        } else {
+          if (label) label.textContent = 'Not running';
+          if (status) { status.textContent = result.error || 'Ollama not found'; status.className = 'settings-key-status error'; }
+        }
+      } catch (err) {
+        if (label) label.textContent = 'Not running';
+        if (status) { status.textContent = err.message; status.className = 'settings-key-status error'; }
+      }
+    });
+  }
+
+  // Ollama model change
+  const ollamaModelSelect = document.getElementById('ollama-model-select');
+  if (ollamaModelSelect) {
+    ollamaModelSelect.addEventListener('change', async () => {
+      await window.electronAPI.connection.setModel('ollama', ollamaModelSelect.value);
     });
   }
 

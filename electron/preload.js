@@ -97,12 +97,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  // Connection provider management (OpenClaw / Claude Code)
+  // Connection provider management
   connection: {
     setProvider: (provider) => ipcRenderer.invoke('connection:setProvider', provider),
     getProvider: () => ipcRenderer.invoke('connection:getProvider'),
     setClaudeCodePath: (path) => ipcRenderer.invoke('connection:setClaudeCodePath', path),
-    validateClaudeCode: () => ipcRenderer.invoke('connection:validateClaudeCode')
+    validateClaudeCode: () => ipcRenderer.invoke('connection:validateClaudeCode'),
+    // OpenAI
+    validateOpenAI: (apiKey) => ipcRenderer.invoke('connection:validateOpenAI', apiKey),
+    listOpenAIModels: () => ipcRenderer.invoke('connection:listOpenAIModels'),
+    setOpenAIKey: (apiKey) => ipcRenderer.invoke('connection:setOpenAIKey', apiKey),
+    // Gemini
+    validateGemini: (apiKey) => ipcRenderer.invoke('connection:validateGemini', apiKey),
+    listGeminiModels: () => ipcRenderer.invoke('connection:listGeminiModels'),
+    setGeminiKey: (apiKey) => ipcRenderer.invoke('connection:setGeminiKey', apiKey),
+    // Anthropic
+    validateAnthropic: (apiKey) => ipcRenderer.invoke('connection:validateAnthropic', apiKey),
+    listAnthropicModels: () => ipcRenderer.invoke('connection:listAnthropicModels'),
+    setAnthropicKey: (apiKey) => ipcRenderer.invoke('connection:setAnthropicKey', apiKey),
+    // Ollama
+    validateOllama: () => ipcRenderer.invoke('connection:validateOllama'),
+    listOllamaModels: () => ipcRenderer.invoke('connection:listOllamaModels'),
+    // Generic
+    setModel: (provider, model) => ipcRenderer.invoke('connection:setModel', provider, model),
+    startOAuth: (provider) => ipcRenderer.invoke('connection:startOAuth', provider)
   },
 
   // STT provider management (Deepgram / Groq Whisper)

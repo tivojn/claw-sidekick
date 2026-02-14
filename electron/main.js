@@ -1,5 +1,9 @@
 const { app, BrowserWindow, ipcMain, Notification, shell, globalShortcut } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const https = require('https');
+const http = require('http');
 const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const WebSocket = require('ws');
 require('dotenv').config();
@@ -168,6 +172,9 @@ const taskManager = new TaskManager();
 let deepgramClient = null;
 let deepgramLive = null;
 let currentSender = null;
+
+// ===== Conversation history for direct API providers =====
+let conversationHistory = [];
 
 // ===== Clawdbot WebSocket 配置 =====
 const CLAWDBOT_PORT = process.env.CLAWDBOT_PORT || 18789;
@@ -690,14 +697,536 @@ async function chatWithClaudeCode(message) {
   });
 }
 
+// ===== OpenAI API =====
+function openaiRequest(method, path, apiKey, body) {
+  return new Promise((resolve, reject) => {
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const options = {
+      hostname: 'api.openai.com',
+      path,
+      method,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    };
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          try { const j = JSON.parse(data); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`HTTP ${res.statusCode}`)); }
+          return;
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse response')); }
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function validateOpenAIKey(apiKey) {
+  const result = await openaiRequest('GET', '/v1/models', apiKey);
+  const models = (result.data || [])
+    .filter(m => m.id.match(/^(gpt-|o[1-9]|chatgpt-)/))
+    .map(m => ({ id: m.id, name: m.id, owned_by: m.owned_by }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return { valid: true, models };
+}
+
+async function chatWithOpenAI(message, apiKey, model) {
+  conversationHistory.push({ role: 'user', content: message });
+  // Keep last 20 messages
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: model || 'gpt-4o',
+      messages: [{ role: 'system', content: 'You are a helpful AI assistant.' }, ...conversationHistory],
+      stream: true
+    });
+    const options = {
+      hostname: 'api.openai.com',
+      path: '/v1/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 120000
+    };
+    let accumulated = '';
+    const req = https.request(options, (res) => {
+      if (res.statusCode >= 400) {
+        let errData = '';
+        res.on('data', (c) => { errData += c; });
+        res.on('end', () => {
+          try { const j = JSON.parse(errData); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`OpenAI HTTP ${res.statusCode}`)); }
+        });
+        return;
+      }
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') {
+            splitter.finish();
+            conversationHistory.push({ role: 'assistant', content: accumulated });
+            resolve(accumulated);
+            return;
+          }
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              accumulated += delta;
+              splitter.addText(delta);
+            }
+          } catch (_) {}
+        }
+      });
+      res.on('end', () => {
+        if (accumulated) {
+          splitter.finish();
+          conversationHistory.push({ role: 'assistant', content: accumulated });
+          resolve(accumulated);
+        } else {
+          reject(new Error('No response from OpenAI'));
+        }
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('OpenAI request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ===== Gemini API =====
+function geminiRequest(method, path, apiKey, body) {
+  return new Promise((resolve, reject) => {
+    const separator = path.includes('?') ? '&' : '?';
+    const fullPath = `${path}${separator}key=${apiKey}`;
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const options = {
+      hostname: 'generativelanguage.googleapis.com',
+      path: fullPath,
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000
+    };
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          try { const j = JSON.parse(data); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`HTTP ${res.statusCode}`)); }
+          return;
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse response')); }
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function validateGeminiKey(apiKey) {
+  const result = await geminiRequest('GET', '/v1beta/models', apiKey);
+  const models = (result.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => ({ id: m.name.replace('models/', ''), name: m.displayName || m.name, description: m.description || '' }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return { valid: true, models };
+}
+
+async function chatWithGemini(message, apiKey, model) {
+  conversationHistory.push({ role: 'user', content: message });
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  // Gemini uses different message format
+  const geminiHistory = conversationHistory.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
+
+  return new Promise((resolve, reject) => {
+    const modelId = model || 'gemini-2.0-flash';
+    const body = JSON.stringify({
+      contents: geminiHistory,
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+    });
+    const apiKeyParam = `key=${apiKey}`;
+    const fullPath = `/v1beta/models/${modelId}:streamGenerateContent?alt=sse&${apiKeyParam}`;
+    const options = {
+      hostname: 'generativelanguage.googleapis.com',
+      path: fullPath,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 120000
+    };
+    let accumulated = '';
+    const req = https.request(options, (res) => {
+      if (res.statusCode >= 400) {
+        let errData = '';
+        res.on('data', (c) => { errData += c; });
+        res.on('end', () => {
+          try { const j = JSON.parse(errData); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`Gemini HTTP ${res.statusCode}`)); }
+        });
+        return;
+      }
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (!payload) continue;
+          try {
+            const json = JSON.parse(payload);
+            const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              accumulated += text;
+              splitter.addText(text);
+            }
+          } catch (_) {}
+        }
+      });
+      res.on('end', () => {
+        splitter.finish();
+        if (accumulated) {
+          conversationHistory.push({ role: 'assistant', content: accumulated });
+        }
+        resolve(accumulated || 'No response from Gemini');
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Gemini request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ===== Anthropic/Claude API =====
+function anthropicRequest(method, path, apiKey, body) {
+  return new Promise((resolve, reject) => {
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const options = {
+      hostname: 'api.anthropic.com',
+      path,
+      method,
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    };
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          try { const j = JSON.parse(data); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`HTTP ${res.statusCode}`)); }
+          return;
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse response')); }
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function validateAnthropicKey(apiKey) {
+  const result = await anthropicRequest('GET', '/v1/models?limit=100', apiKey);
+  const models = (result.data || [])
+    .map(m => ({ id: m.id, name: m.display_name || m.id }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return { valid: true, models };
+}
+
+async function chatWithAnthropic(message, apiKey, model) {
+  conversationHistory.push({ role: 'user', content: message });
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: model || 'claude-sonnet-4-5-20250929',
+      max_tokens: 2048,
+      system: 'You are a helpful AI assistant.',
+      messages: conversationHistory,
+      stream: true
+    });
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 120000
+    };
+    let accumulated = '';
+    const req = https.request(options, (res) => {
+      if (res.statusCode >= 400) {
+        let errData = '';
+        res.on('data', (c) => { errData += c; });
+        res.on('end', () => {
+          try { const j = JSON.parse(errData); reject(new Error(j.error?.message || `HTTP ${res.statusCode}`)); }
+          catch (_) { reject(new Error(`Anthropic HTTP ${res.statusCode}`)); }
+        });
+        return;
+      }
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (!payload) continue;
+          try {
+            const json = JSON.parse(payload);
+            if (json.type === 'content_block_delta' && json.delta?.text) {
+              accumulated += json.delta.text;
+              splitter.addText(json.delta.text);
+            }
+            if (json.type === 'message_stop') {
+              splitter.finish();
+              conversationHistory.push({ role: 'assistant', content: accumulated });
+              resolve(accumulated);
+              return;
+            }
+          } catch (_) {}
+        }
+      });
+      res.on('end', () => {
+        splitter.finish();
+        if (accumulated) {
+          conversationHistory.push({ role: 'assistant', content: accumulated });
+        }
+        resolve(accumulated || 'No response from Claude');
+      });
+    });
+    req.on('error', (e) => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Anthropic request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ===== Ollama (local) =====
+
+function ollamaRequest(method, path, body) {
+  return new Promise((resolve, reject) => {
+    const bodyStr = body ? JSON.stringify(body) : null;
+    const options = {
+      hostname: 'localhost',
+      port: 11434,
+      path,
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 10000
+    };
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const req = http.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          reject(new Error(`Ollama HTTP ${res.statusCode}`));
+          return;
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse Ollama response')); }
+      });
+    });
+    req.on('error', (e) => reject(new Error(`Ollama not reachable: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function validateOllama() {
+  const result = await ollamaRequest('GET', '/api/tags');
+  const models = (result.models || []).map(m => ({
+    id: m.name || m.model,
+    name: m.name || m.model,
+    size: m.size,
+    modified: m.modified_at
+  }));
+  return { valid: true, models };
+}
+
+async function chatWithOllama(message, model) {
+  conversationHistory.push({ role: 'user', content: message });
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: model || 'llama3.2',
+      messages: [{ role: 'system', content: 'You are a helpful AI assistant.' }, ...conversationHistory],
+      stream: true
+    });
+    const options = {
+      hostname: 'localhost',
+      port: 11434,
+      path: '/api/chat',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 120000
+    };
+    let accumulated = '';
+    const req = http.request(options, (res) => {
+      if (res.statusCode >= 400) {
+        let errData = '';
+        res.on('data', (c) => { errData += c; });
+        res.on('end', () => reject(new Error(`Ollama HTTP ${res.statusCode}`)));
+        return;
+      }
+      let buffer = '';
+      res.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const json = JSON.parse(line);
+            if (json.message?.content) {
+              accumulated += json.message.content;
+              splitter.addText(json.message.content);
+            }
+            if (json.done) {
+              splitter.finish();
+              conversationHistory.push({ role: 'assistant', content: accumulated });
+              resolve(accumulated);
+              return;
+            }
+          } catch (_) {}
+        }
+      });
+      res.on('end', () => {
+        splitter.finish();
+        if (accumulated) {
+          conversationHistory.push({ role: 'assistant', content: accumulated });
+        }
+        resolve(accumulated || 'No response from Ollama');
+      });
+    });
+    req.on('error', (e) => reject(new Error(`Ollama not running: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
 // ===== AI Command Router =====
 async function executeAICommand(command) {
   const provider = appSettings.connection?.provider || 'openclaw';
   console.log(`[AI Router] Provider: ${provider}`);
-  if (provider === 'claude-code') {
-    return chatWithClaudeCode(command);
+
+  switch (provider) {
+    case 'claude-code':
+      return chatWithClaudeCode(command);
+    case 'openai': {
+      const cfg = appSettings.providers.openai;
+      if (!cfg.apiKey) throw new Error('OpenAI API key not configured');
+      return chatWithOpenAI(command, cfg.apiKey, cfg.model);
+    }
+    case 'gemini': {
+      const cfg = appSettings.providers.gemini;
+      if (!cfg.apiKey) throw new Error('Gemini API key not configured');
+      return chatWithGemini(command, cfg.apiKey, cfg.model);
+    }
+    case 'anthropic': {
+      const cfg = appSettings.providers.anthropic;
+      if (!cfg.apiKey) throw new Error('Anthropic API key not configured');
+      return chatWithAnthropic(command, cfg.apiKey, cfg.model);
+    }
+    case 'ollama':
+      return chatWithOllama(command, appSettings.providers.ollama.model);
+    default:
+      return chatWithClawdbot(command);
   }
-  return chatWithClawdbot(command);
 }
 
 // ===== 窗口创建 =====
@@ -782,14 +1311,6 @@ ipcMain.handle('task:cancel', async (event, taskId) => {
 });
 
 // ===== Connection Provider =====
-ipcMain.handle('connection:setProvider', (event, provider) => {
-  appSettings.connection = appSettings.connection || {};
-  appSettings.connection.provider = provider;
-  saveSettings();
-  console.log(`[Connection] Provider set to: ${provider}`);
-  return { success: true };
-});
-
 ipcMain.handle('connection:getProvider', () => {
   return { provider: appSettings.connection?.provider || 'openclaw' };
 });
@@ -816,6 +1337,155 @@ ipcMain.handle('connection:validateClaudeCode', async () => {
     console.error(`[Connection] Claude Code validation failed: ${e.message}`);
     return { valid: false, error: e.message };
   }
+});
+
+// ===== New provider IPC handlers =====
+
+// Clear conversation when switching providers
+ipcMain.handle('connection:setProvider', (event, provider) => {
+  const oldProvider = appSettings.connection?.provider;
+  appSettings.connection = appSettings.connection || {};
+  appSettings.connection.provider = provider;
+  if (oldProvider !== provider) conversationHistory = [];
+  saveSettings();
+  console.log(`[Connection] Provider set to: ${provider}`);
+  return { success: true };
+});
+
+// OpenAI
+ipcMain.handle('connection:validateOpenAI', async (event, apiKey) => {
+  try {
+    const result = await validateOpenAIKey(apiKey);
+    appSettings.providers.openai.apiKey = apiKey;
+    saveSettings();
+    console.log(`[Connection] OpenAI validated, ${result.models.length} models`);
+    return { success: true, models: result.models };
+  } catch (e) {
+    console.error('[Connection] OpenAI validation failed:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:listOpenAIModels', async () => {
+  try {
+    const apiKey = appSettings.providers.openai.apiKey;
+    if (!apiKey) return { success: false, error: 'No API key' };
+    const result = await validateOpenAIKey(apiKey);
+    return { success: true, models: result.models };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:setOpenAIKey', async (event, apiKey) => {
+  appSettings.providers.openai.apiKey = apiKey;
+  saveSettings();
+  return { success: true };
+});
+
+// Gemini
+ipcMain.handle('connection:validateGemini', async (event, apiKey) => {
+  try {
+    const result = await validateGeminiKey(apiKey);
+    appSettings.providers.gemini.apiKey = apiKey;
+    saveSettings();
+    console.log(`[Connection] Gemini validated, ${result.models.length} models`);
+    return { success: true, models: result.models };
+  } catch (e) {
+    console.error('[Connection] Gemini validation failed:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:listGeminiModels', async () => {
+  try {
+    const apiKey = appSettings.providers.gemini.apiKey;
+    if (!apiKey) return { success: false, error: 'No API key' };
+    const result = await validateGeminiKey(apiKey);
+    return { success: true, models: result.models };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:setGeminiKey', async (event, apiKey) => {
+  appSettings.providers.gemini.apiKey = apiKey;
+  saveSettings();
+  return { success: true };
+});
+
+// Anthropic
+ipcMain.handle('connection:validateAnthropic', async (event, apiKey) => {
+  try {
+    const result = await validateAnthropicKey(apiKey);
+    appSettings.providers.anthropic.apiKey = apiKey;
+    saveSettings();
+    console.log(`[Connection] Anthropic validated, ${result.models.length} models`);
+    return { success: true, models: result.models };
+  } catch (e) {
+    console.error('[Connection] Anthropic validation failed:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:listAnthropicModels', async () => {
+  try {
+    const apiKey = appSettings.providers.anthropic.apiKey;
+    if (!apiKey) return { success: false, error: 'No API key' };
+    const result = await validateAnthropicKey(apiKey);
+    return { success: true, models: result.models };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:setAnthropicKey', async (event, apiKey) => {
+  appSettings.providers.anthropic.apiKey = apiKey;
+  saveSettings();
+  return { success: true };
+});
+
+// Ollama
+ipcMain.handle('connection:validateOllama', async () => {
+  try {
+    const result = await validateOllama();
+    console.log(`[Connection] Ollama validated, ${result.models.length} models`);
+    return { success: true, models: result.models };
+  } catch (e) {
+    console.error('[Connection] Ollama validation failed:', e.message);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('connection:listOllamaModels', async () => {
+  try {
+    const result = await validateOllama();
+    return { success: true, models: result.models };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Generic model setter
+ipcMain.handle('connection:setModel', (event, provider, model) => {
+  if (appSettings.providers[provider]) {
+    appSettings.providers[provider].model = model;
+    saveSettings();
+    console.log(`[Connection] ${provider} model set to: ${model}`);
+  }
+  return { success: true };
+});
+
+// OpenAI OAuth2 — open browser to get API key
+ipcMain.handle('connection:startOAuth', async (event, provider) => {
+  if (provider === 'openai') {
+    // OpenAI doesn't have a public third-party OAuth2 API.
+    // Instead, open the API keys page so user can create/copy a key.
+    const { shell } = require('electron');
+    shell.openExternal('https://platform.openai.com/api-keys');
+    return { success: true, message: 'Opened OpenAI API keys page. Copy your key and paste it here.' };
+  }
+  return { success: false, error: 'OAuth not supported for this provider' };
 });
 
 // ===== Deepgram STT =====
@@ -976,8 +1646,6 @@ ipcMain.handle('deepgram:sendAudio', async (event, audioData) => {
 
 // ===== Edge-TTS =====
 const { execFile } = require('child_process');
-const fs = require('fs');
-const os = require('os');
 
 // 当前选择的音色（可被前端动态修改）
 let currentVoiceId = 'en-US-EmmaMultilingualNeural';
@@ -994,7 +1662,11 @@ const OLD_TTS_CONFIG_PATH = path.join(os.homedir(), '.claw-sidekick-tts.json');
 const DEFAULT_SETTINGS = {
   providers: {
     minimax: { apiKey: '' },
-    groq: { apiKey: '' }
+    groq: { apiKey: '' },
+    openai: { apiKey: '', model: 'gpt-4o' },
+    gemini: { apiKey: '', model: 'gemini-2.0-flash' },
+    anthropic: { apiKey: '', model: 'claude-sonnet-4-5-20250929' },
+    ollama: { model: 'llama3.2' }
   },
   avatars: {
     lobster: { ttsProvider: 'edge', edgeVoice: 'en-US-EmmaMultilingualNeural', minimaxVoice: 'English_Graceful_Lady' },
@@ -1114,7 +1786,6 @@ async function callEdgeTTS(text) {
 }
 
 // ===== MiniMax TTS =====
-const https = require('https');
 
 async function callMiniMaxTTS(text) {
   if (!minimaxConfig.apiKey) {
@@ -1647,9 +2318,6 @@ ipcMain.on('window:setPosition', (event, x, y) => {
 // 在 Finder 中显示文件
 ipcMain.handle('file:showInFolder', async (event, filePath) => {
   try {
-    const fs = require('fs');
-    const os = require('os');
-
     // 展开 ~ 为用户目录
     let expandedPath = filePath;
     if (filePath.startsWith('~/')) {

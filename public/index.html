@@ -237,8 +237,42 @@
               </div>
               <span class="connection-status" id="claude-code-conn-status"></span>
             </div>
+            <div class="settings-connection-item" data-connection="openai">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:creation"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">OpenAI</div>
+                <div class="connection-desc">GPT-4o, o1, o3 &amp; more</div>
+              </div>
+              <span class="connection-status" id="openai-conn-status"></span>
+            </div>
+            <div class="settings-connection-item" data-connection="gemini">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:google"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">Gemini</div>
+                <div class="connection-desc">Google Gemini models</div>
+              </div>
+              <span class="connection-status" id="gemini-conn-status"></span>
+            </div>
+            <div class="settings-connection-item" data-connection="anthropic">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:head-snowflake-outline"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">Claude API</div>
+                <div class="connection-desc">Anthropic Claude models</div>
+              </div>
+              <span class="connection-status" id="anthropic-conn-status"></span>
+            </div>
+            <div class="settings-connection-item" data-connection="ollama">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:server"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">Ollama</div>
+                <div class="connection-desc">Local models (llama, mistral...)</div>
+              </div>
+              <span class="connection-status" id="ollama-conn-status"></span>
+            </div>
           </div>
-          <div class="settings-claude-code-config" id="settings-claude-code-config" style="display: none;">
+
+          <!-- Claude Code config -->
+          <div class="settings-provider-config" id="settings-claude-code-config" style="display: none;">
             <div class="settings-row">
               <span class="settings-label">CLI Path</span>
               <div class="settings-key-input-row">
@@ -246,6 +280,74 @@
                 <button class="settings-key-save" id="claude-code-validate">Test</button>
               </div>
               <div class="settings-key-status" id="claude-code-status"></div>
+            </div>
+          </div>
+
+          <!-- OpenAI config -->
+          <div class="settings-provider-config" id="settings-openai-config" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">API Key</span>
+              <div class="settings-key-input-row">
+                <input type="password" class="settings-input" id="openai-key" placeholder="sk-..." />
+                <button class="settings-key-save" id="openai-key-save">Save</button>
+              </div>
+              <div class="settings-key-status" id="openai-key-status"></div>
+            </div>
+            <div class="settings-row" id="openai-model-row" style="display: none;">
+              <span class="settings-label">Model</span>
+              <select class="settings-model-select" id="openai-model-select"></select>
+            </div>
+            <button class="settings-oauth-btn" id="openai-oauth-btn">
+              <span class="iconify" data-icon="mdi:open-in-new" style="margin-right:4px"></span>
+              Get API Key from OpenAI
+            </button>
+          </div>
+
+          <!-- Gemini config -->
+          <div class="settings-provider-config" id="settings-gemini-config" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">API Key</span>
+              <div class="settings-key-input-row">
+                <input type="password" class="settings-input" id="gemini-key" placeholder="AIza..." />
+                <button class="settings-key-save" id="gemini-key-save">Save</button>
+              </div>
+              <div class="settings-key-status" id="gemini-key-status"></div>
+            </div>
+            <div class="settings-row" id="gemini-model-row" style="display: none;">
+              <span class="settings-label">Model</span>
+              <select class="settings-model-select" id="gemini-model-select"></select>
+            </div>
+          </div>
+
+          <!-- Anthropic config -->
+          <div class="settings-provider-config" id="settings-anthropic-config" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">API Key</span>
+              <div class="settings-key-input-row">
+                <input type="password" class="settings-input" id="anthropic-key" placeholder="sk-ant-..." />
+                <button class="settings-key-save" id="anthropic-key-save">Save</button>
+              </div>
+              <div class="settings-key-status" id="anthropic-key-status"></div>
+            </div>
+            <div class="settings-row" id="anthropic-model-row" style="display: none;">
+              <span class="settings-label">Model</span>
+              <select class="settings-model-select" id="anthropic-model-select"></select>
+            </div>
+          </div>
+
+          <!-- Ollama config -->
+          <div class="settings-provider-config" id="settings-ollama-config" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">Status</span>
+              <div class="settings-key-input-row">
+                <span class="settings-label" id="ollama-detect-label" style="flex:1">Not checked</span>
+                <button class="settings-key-save" id="ollama-detect-btn">Detect</button>
+              </div>
+              <div class="settings-key-status" id="ollama-key-status"></div>
+            </div>
+            <div class="settings-row" id="ollama-model-row" style="display: none;">
+              <span class="settings-label">Model</span>
+              <select class="settings-model-select" id="ollama-model-select"></select>
             </div>
           </div>
         </div>
