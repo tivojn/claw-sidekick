@@ -602,6 +602,7 @@ function createWindow() {
     alwaysOnTop: true,
     resizable: true,
     skipTaskbar: false,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -610,6 +611,12 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../public/index.html'));
+
+  // Log renderer console messages to terminal
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const prefix = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
+    console.log(`[Renderer/${prefix}] ${message}`);
+  });
 
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -886,21 +893,17 @@ ipcMain.handle('deepgram:textToSpeech', async (event, text) => {
 // ===== 窗口控制 =====
 const FULL_WIDTH = 330;
 const FULL_HEIGHT = 550;
-const MINI_SIZE = 64;
+const MINI_SIZE = 80;
 let isMiniMode = false;
 
 ipcMain.on('window:minimize', () => {
   if (!mainWindow) return;
-  // 切换到悬浮球模式
   isMiniMode = true;
   const bounds = mainWindow.getBounds();
-  // 记住展开位置
   mainWindow._restoreX = bounds.x;
   mainWindow._restoreY = bounds.y;
-  // 缩小到悬浮球
   mainWindow.setMinimumSize(MINI_SIZE, MINI_SIZE);
   mainWindow.setSize(MINI_SIZE, MINI_SIZE);
-  // 移动到屏幕右下区域
   const { screen } = require('electron');
   const display = screen.getPrimaryDisplay();
   const x = display.workArea.x + display.workArea.width - MINI_SIZE - 20;
@@ -914,7 +917,6 @@ ipcMain.on('window:restore', () => {
   isMiniMode = false;
   mainWindow.setMinimumSize(200, 300);
   mainWindow.setSize(FULL_WIDTH, FULL_HEIGHT);
-  // 恢复到之前的位置
   if (mainWindow._restoreX !== undefined) {
     mainWindow.setPosition(mainWindow._restoreX, mainWindow._restoreY);
   } else {
@@ -925,6 +927,10 @@ ipcMain.on('window:restore', () => {
 
 ipcMain.on('window:close', () => {
   if (mainWindow) mainWindow.close();
+});
+
+ipcMain.on('window:setPosition', (event, x, y) => {
+  if (mainWindow) mainWindow.setPosition(Math.round(x), Math.round(y));
 });
 
 // ===== 文件操作 =====

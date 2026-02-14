@@ -11,6 +11,7 @@ let audioPlayer = null;
 let followupTimer = null;
 let bubbleHideTimer = null;
 let auraAnimator = null;
+let live2dRenderer = null;
 let executeTimer = null;
 let accumulatedTranscript = '';
 let lastAIResponse = '';
@@ -20,7 +21,7 @@ let countdownInterval = null;
 const CHARACTER_PROFILES = {
   lobster: {
     id: 'lobster',
-    name: 'Lobster',
+    name: 'Haru',
     desc: 'Fun & energetic AI buddy',
     icon: 'mdi:fish',
     welcomeText: "Hey! What's up? I'm your AI buddy, hit me up with anything!",
@@ -34,6 +35,7 @@ const CHARACTER_PROFILES = {
       'On it, give me a moment...',
       'Hold tight, answer coming!'
     ],
+    model: 'models/haru/haru_greeter_t03.model3.json',
     videos: {
       welcome: 'lobster-welcome.mp4',
       idle: 'lobster-listening.mp4',
@@ -71,6 +73,7 @@ const CHARACTER_PROFILES = {
       "On it, one sec!",
       "Alright, let me find out!",
     ],
+    model: 'models/mao/Mao.model3.json',
     videos: {
       welcome: 'amy-welcome.mp4',
       idle: 'amy-listening.mp4',
@@ -102,6 +105,7 @@ const CHARACTER_PROFILES = {
       'Working hard, meow~',
       'Almost done, meow!',
     ],
+    model: 'models/natori/Natori.model3.json',
     videos: {
       welcome: 'cat-welcome.mp4',
       idle: 'cat-idle.mp4',
@@ -133,6 +137,7 @@ const CHARACTER_PROFILES = {
       'Running analysis...',
       'Crunching numbers...',
     ],
+    model: 'models/hiyori/Hiyori.model3.json',
     videos: {
       welcome: 'robot-welcome.mp4',
       idle: 'robot-idle.mp4',
@@ -174,7 +179,6 @@ const speechBubble = document.getElementById('speech-bubble');
 const bubbleText = document.getElementById('bubble-text');
 const statusHint = document.getElementById('status-hint');
 const lobsterArea = document.getElementById('lobster-area');
-const lobsterChar = document.getElementById('lobster-char');
 const stateIndicator = document.getElementById('state-indicator');
 const stateDot = stateIndicator.querySelector('.state-dot');
 const stateText = document.getElementById('state-text');
@@ -184,13 +188,25 @@ const textInput = document.getElementById('text-input');
 const sendBtn = document.getElementById('send-btn');
 const tapHint = document.getElementById('tap-hint');
 const listeningPulseRing = document.getElementById('listening-pulse-ring');
+const foldToggle = document.getElementById('fold-toggle');
+const bottomPanel = document.getElementById('bottom-panel');
 
-// ===== 初始化光环动画 =====
-document.addEventListener('DOMContentLoaded', () => {
+// ===== 初始化光环动画 + Live2D =====
+document.addEventListener('DOMContentLoaded', async () => {
   const canvas = document.getElementById('aura-canvas');
   if (canvas && window.OrbAnimator) {
     auraAnimator = new OrbAnimator(canvas);
   }
+
+  // Initialize Live2D renderer
+  if (window.Live2DRenderer) {
+    live2dRenderer = new Live2DRenderer(lobsterArea);
+    // Load the current character's model
+    if (currentCharacter.model) {
+      await live2dRenderer.loadModel(currentCharacter.model);
+    }
+  }
+
   initDeepgramListeners();
   initVoice();
   initTaskListeners();
@@ -198,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initStreamingTTS();  // 初始化流式 TTS 监听
   initFilePathClickHandler();  // 初始化文件路径点击处理
 
-  // 首次启动播放欢迎视频
+  // 首次启动播放欢迎动画
   if (isFirstLaunch) {
     playWelcomeVideo();
   }
@@ -252,8 +268,6 @@ function setAppState(newState) {
   appState = newState;
   clearTimeout(followupTimer);
 
-  // 更新龙虾动画class
-  lobsterChar.className = 'lobster-character';
   stateDot.className = 'state-dot';
   statusHint.className = 'status-hint';
 
@@ -269,8 +283,10 @@ function setAppState(newState) {
     listeningPulseRing.classList.add('hidden');
   }
 
-  // 切换视频源
-  switchVideo(newState);
+  // Update Live2D model state
+  if (live2dRenderer) {
+    live2dRenderer.setState(newState);
+  }
 
   switch (newState) {
     case 'welcome':
@@ -283,14 +299,12 @@ function setAppState(newState) {
       statusHint.textContent = '';
       break;
     case 'listening':
-      lobsterChar.classList.add('listening');
       stateDot.classList.add('listening');
       statusHint.classList.add('listening');
       stateText.textContent = 'Listening...';
       statusHint.textContent = 'Speak now...';
       break;
     case 'thinking':
-      lobsterChar.classList.add('thinking');
       stateDot.classList.add('thinking');
       statusHint.classList.add('thinking');
       stateText.textContent = 'Thinking...';
@@ -298,14 +312,12 @@ function setAppState(newState) {
       showBubble('<div class="thinking-dots"><span></span><span></span><span></span></div>', false);
       break;
     case 'speaking':
-      lobsterChar.classList.add('speaking');
       stateDot.classList.add('speaking');
       statusHint.classList.add('speaking');
       stateText.textContent = 'Replying...';
       statusHint.textContent = 'Here comes the answer...';
       break;
     case 'followup':
-      lobsterChar.classList.add('listening');
       stateDot.classList.add('listening');
       statusHint.classList.add('listening');
       stateText.textContent = 'Keep talking, I\'m listening...';
@@ -336,90 +348,22 @@ function setAppState(newState) {
   }
 }
 
-// 需要播放视频自带音频的状态
-const VIDEO_WITH_AUDIO = ['welcome', 'thinking'];
-
-// ===== 视频切换功能 =====
-function switchVideo(state) {
-  const videoSource = VIDEO_SOURCES[state] || VIDEO_SOURCES.idle;
-  const videoElement = document.getElementById('lobster-char');
-
-  if (videoElement && videoElement.tagName === 'VIDEO') {
-    const sourceElement = videoElement.querySelector('source');
-    const currentSrc = sourceElement ? sourceElement.src : '';
-    const newSrc = videoSource;
-
-    // 只在视频源不同时才切换
-    if (!currentSrc.endsWith(newSrc)) {
-      console.log(`[Video] ${state} -> ${videoSource}`);
-
-      // 添加过渡动画
-      videoElement.classList.add('video-transition');
-      setTimeout(() => videoElement.classList.remove('video-transition'), 400);
-
-      // 保存当前播放状态
-      const wasPlaying = !videoElement.paused;
-
-      // 更新视频源
-      if (sourceElement) {
-        sourceElement.src = newSrc;
-      }
-
-      // 根据状态决定是否启用视频音频
-      const useVideoAudio = VIDEO_WITH_AUDIO.includes(state);
-      videoElement.muted = !useVideoAudio;
-
-      // 重新加载并播放
-      videoElement.load();
-      if (wasPlaying || useVideoAudio) {
-        videoElement.play().catch(err => {
-          console.warn('[Video] 自动播放失败:', err);
-          // 如果有声播放失败，降级为静音播放
-          if (useVideoAudio) {
-            videoElement.muted = true;
-            videoElement.play().catch(() => {});
-          }
-        });
-      }
-    } else {
-      // 视频源相同，但可能需要更新音频状态
-      const useVideoAudio = VIDEO_WITH_AUDIO.includes(state);
-      videoElement.muted = !useVideoAudio;
-    }
-  }
-}
-
-// ===== 播放欢迎视频 =====
+// ===== 播放欢迎动画 =====
 function playWelcomeVideo() {
-  console.log('[App] 播放欢迎视频');
+  console.log('[App] Playing welcome animation');
   setAppState('welcome');
 
-  const videoElement = document.getElementById('lobster-char');
-  if (videoElement && videoElement.tagName === 'VIDEO') {
-    // 移除 loop 属性，让欢迎视频只播放一次
-    videoElement.loop = false;
-    // 始终静音视频，用 TTS 播放欢迎语
-    videoElement.muted = true;
-
-    // 监听视频播放结束
-    videoElement.onended = () => {
-      console.log('[App] 欢迎视频播放完毕，切换到待机状态');
-      videoElement.loop = true;
-      videoElement.onended = null;
+  // Live2D welcome motion is triggered by setState('welcome')
+  // After a few seconds, transition to idle
+  setTimeout(() => {
+    if (appState === 'welcome') {
       isFirstLaunch = false;
       setAppState('idle');
-    };
+    }
+  }, 4000);
 
-    // 播放静音视频 + TTS 欢迎语
-    videoElement.play().catch(err => {
-      console.warn('[Video] 欢迎视频自动播放失败:', err);
-      videoElement.loop = true;
-      isFirstLaunch = false;
-      setAppState('idle');
-    });
-    // 用 edge-tts 播放欢迎语音
-    playWelcomeAudioFallback();
-  }
+  // Play welcome TTS
+  playWelcomeAudioFallback();
 }
 
 // ===== 播放欢迎语音（兜底：视频无法有声播放时使用TTS） =====
@@ -640,34 +584,6 @@ function initFilePathClickHandler() {
   });
 }
 
-// 初始化文件路径点击事件监听
-function initFilePathClickHandler() {
-  document.addEventListener('click', async (e) => {
-    const pathElement = e.target.closest('.file-path');
-    if (pathElement) {
-      e.stopPropagation();
-      const filePath = pathElement.dataset.path;
-
-      console.log('[File] 点击文件路径:', filePath);
-
-      try {
-        const result = await window.electronAPI.file.showInFolder(filePath);
-        if (result.success) {
-          // 显示成功反馈
-          pathElement.classList.add('clicked');
-          setTimeout(() => pathElement.classList.remove('clicked'), 500);
-        } else {
-          console.warn('[File] 打开失败:', result.error);
-          // 显示错误提示
-          showBubble(`Can't open path: ${result.error}`);
-        }
-      } catch (err) {
-        console.error('[File] 调用失败:', err);
-      }
-    }
-  });
-}
-
 // ===== Deepgram 事件监听 =====
 function initDeepgramListeners() {
   window.electronAPI.deepgram.removeAllListeners();
@@ -776,6 +692,10 @@ function interruptTTS() {
   isPlayingQueue = false;
   streamingTextBuffer = '';
   isSpeaking = false;
+  // Stop Live2D lip sync
+  if (live2dRenderer) {
+    live2dRenderer.stopSpeaking();
+  }
   // 通知主进程停止 TTS 生成
   window.electronAPI.tts.stop();
 }
@@ -828,13 +748,13 @@ async function processAudioQueue() {
   }
 }
 
-// 播放单个音频块（音频开始播放时才显示对应文本）
+// 播放单个音频块（音频开始播放时才显示对应文本 + Live2D lip sync）
 function playAudioChunk(audioBase64, text) {
   return new Promise((resolve) => {
     const audioDataUrl = 'data:audio/mp3;base64,' + audioBase64;
     const audio = new Audio(audioDataUrl);
 
-    // 音频开始播放时才显示文本
+    // 音频开始播放时才显示文本 + start lip sync
     audio.onplay = () => {
       // 追加文本到缓冲区并更新显示
       if (streamingTextBuffer && !streamingTextBuffer.includes(text)) {
@@ -843,13 +763,25 @@ function playAudioChunk(audioBase64, text) {
         streamingTextBuffer = text;
       }
       showBubble(escapeHtml(streamingTextBuffer));
+
+      // Start Live2D lip sync with simulated mouth movement
+      if (live2dRenderer) {
+        live2dRenderer._startSimulatedLipSync();
+      }
     };
 
     audio.onended = () => {
+      // Stop lip sync when audio chunk ends
+      if (live2dRenderer) {
+        live2dRenderer.stopSpeaking();
+      }
       resolve();
     };
 
     audio.onerror = () => {
+      if (live2dRenderer) {
+        live2dRenderer.stopSpeaking();
+      }
       resolve();
     };
 
@@ -944,7 +876,7 @@ async function stopRecording() {
   await window.electronAPI.deepgram.stopListening();
 }
 
-// ===== 点击龙虾 → 聚焦文本输入 (voice disabled, text-only mode) =====
+// ===== 点击角色区域 → 聚焦文本输入 (voice disabled, text-only mode) =====
 async function onLobsterClick() {
   // speaking 状态下允许打断
   if (appState === 'speaking') {
@@ -960,16 +892,14 @@ async function onLobsterClick() {
 
   // thinking 状态下允许打断
   if (appState === 'thinking') {
-    console.log('[App] 打断查询任务');
+    console.log('[App] Interrupting query');
     interruptCurrentTask();
     return;
   }
 
   if (isProcessing) return;
 
-  // Activate bounce animation and focus text input
-  lobsterChar.classList.add('active');
-  setTimeout(() => lobsterChar.classList.remove('active'), 600);
+  // Focus text input on click
   textInput.focus();
 }
 
@@ -1117,7 +1047,7 @@ async function playTextToSpeech(text) {
     const result = await window.electronAPI.deepgram.textToSpeech(text);
 
     if (!result.success) {
-      console.warn('[App] TTS 失败:', result.error);
+      console.warn('[App] TTS failed:', result.error);
       isSpeaking = false;
       return;
     }
@@ -1132,28 +1062,44 @@ async function playTextToSpeech(text) {
     audioPlayer = new Audio(audioDataUrl);
 
     return new Promise((resolve) => {
+      audioPlayer.onplay = () => {
+        // Start Live2D lip sync
+        if (live2dRenderer) {
+          live2dRenderer._startSimulatedLipSync();
+        }
+      };
+
       audioPlayer.onended = () => {
         isSpeaking = false;
         audioPlayer = null;
+        if (live2dRenderer) {
+          live2dRenderer.stopSpeaking();
+        }
         resolve();
       };
 
       audioPlayer.onerror = (e) => {
-        console.error('[App] TTS 播放错误:', e);
+        console.error('[App] TTS playback error:', e);
         isSpeaking = false;
         audioPlayer = null;
+        if (live2dRenderer) {
+          live2dRenderer.stopSpeaking();
+        }
         resolve();
       };
 
       audioPlayer.play().catch((err) => {
-        console.error('[App] TTS play() 失败:', err);
+        console.error('[App] TTS play() failed:', err);
         isSpeaking = false;
         audioPlayer = null;
+        if (live2dRenderer) {
+          live2dRenderer.stopSpeaking();
+        }
         resolve();
       });
     });
   } catch (error) {
-    console.error('[App] TTS 失败:', error);
+    console.error('[App] TTS failed:', error);
     isSpeaking = false;
     audioPlayer = null;
   }
@@ -1351,19 +1297,16 @@ const closeCharacterPanel = document.getElementById('close-character-panel');
 function renderCharacterList() {
   characterList.innerHTML = '';
 
-  // 检查角色视频资源是否可用
-  const availableCharacters = ['lobster', 'amy']; // 有视频资源的角色
-
   Object.values(CHARACTER_PROFILES).forEach(char => {
     const item = document.createElement('div');
     item.className = 'character-item' + (char.id === currentCharacter.id ? ' active' : '');
 
-    const isAvailable = availableCharacters.includes(char.id);
+    const isAvailable = !!char.model; // Available if has a Live2D model
 
     item.innerHTML = `
       <span class="character-icon"><span class="iconify" data-icon="${char.icon}"></span></span>
       <div class="character-info">
-        <div class="character-name">${char.name}${!isAvailable ? ' <span class="coming-soon">Coming soon</span>' : ''}</div>
+        <div class="character-name">${char.name}${!isAvailable ? ' <span class="coming-soon">No model</span>' : ''}</div>
         <div class="character-desc">${char.desc}</div>
       </div>
       ${char.id === currentCharacter.id ? '<span class="character-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
@@ -1396,6 +1339,11 @@ async function switchCharacter(characterId) {
     auraAnimator.updateColors(newChar.auraColors);
   }
 
+  // Load new Live2D model
+  if (live2dRenderer && newChar.model) {
+    await live2dRenderer.loadModel(newChar.model);
+  }
+
   // 切换默认音色
   currentSelectedVoice = newChar.defaultVoice;
   try {
@@ -1425,9 +1373,11 @@ function openCharacterPanel() {
 // ===== 悬浮球模式 =====
 const miniOrb = document.getElementById('mini-orb');
 const widgetContainer = document.getElementById('widget-container');
-const miniOrbVideo = document.getElementById('mini-orb-video');
+const miniOrbAvatar = document.getElementById('mini-orb-avatar');
 let isMiniMode = false;
-let miniOrbClickTimer = null;
+let miniOrbFrameInterval = null;
+let miniOrbCropCanvas = null;
+let miniOrbCropCtx = null;
 
 function initMiniMode() {
   // 监听主进程的迷你模式切换
@@ -1439,37 +1389,35 @@ function initMiniMode() {
     }
   });
 
-  // 单击悬浮球 = 开始/停止聆听；双击悬浮球 = 恢复大窗口
-  miniOrb.addEventListener('click', (e) => {
-    console.log('[Orb] 点击事件触发, isMiniMode:', isMiniMode, 'target:', e.target.className);
-    // 点击放大按钮时不处理
-    if (e.target.closest('.mini-expand-btn')) return;
+  // Drag-to-move + click-to-restore
+  let dragStartX, dragStartY, isDragging = false;
+  miniOrb.addEventListener('mousedown', (e) => {
+    dragStartX = e.screenX;
+    dragStartY = e.screenY;
+    isDragging = false;
 
-    if (miniOrbClickTimer) {
-      // 双击：恢复大窗口
-      clearTimeout(miniOrbClickTimer);
-      miniOrbClickTimer = null;
-      console.log('[Orb] 双击 → 恢复大窗口');
-      window.electronAPI.restoreWindow();
-    } else {
-      // 等待判断是否双击
-      miniOrbClickTimer = setTimeout(() => {
-        miniOrbClickTimer = null;
-        console.log('[Orb] 单击 → 切换聆听');
-        // 单击：切换聆听
-        onMiniOrbTap();
-      }, 250);
-    }
+    const onMove = (ev) => {
+      const dx = ev.screenX - dragStartX;
+      const dy = ev.screenY - dragStartY;
+      if (!isDragging && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        isDragging = true;
+      }
+      if (isDragging) {
+        window.electronAPI.setWindowPosition &&
+          window.electronAPI.setWindowPosition(ev.screenX - 20, ev.screenY - 20);
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (!isDragging) {
+        console.log('[Orb] click → restore');
+        window.electronAPI.restoreWindow();
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   });
-
-  // 放大按钮
-  const expandBtn = document.getElementById('mini-expand-btn');
-  if (expandBtn) {
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.electronAPI.restoreWindow();
-    });
-  }
 }
 
 // 悬浮球单击 → 开始/停止聆听
@@ -1517,31 +1465,76 @@ function setMiniOrbState(state) {
   } else if (state === 'speaking') {
     miniOrb.classList.add('mini-speaking');
   }
-  // 切换悬浮球视频匹配状态
-  const videoSrc = VIDEO_SOURCES[state] || VIDEO_SOURCES.idle;
-  const source = miniOrbVideo.querySelector('source');
-  if (source && !source.src.endsWith(videoSrc)) {
-    source.src = videoSrc;
-    miniOrbVideo.load();
-    miniOrbVideo.play().catch(() => {});
-  }
 }
 
 function enterMiniMode() {
   console.log('[Orb] 进入迷你模式');
   isMiniMode = true;
-  widgetContainer.style.display = 'none';
+  document.documentElement.classList.add('mini-mode');
+  document.body.classList.add('mini-mode');
+  // Keep Live2D rendering off-screen at original size
+  widgetContainer.style.opacity = '0';
+  widgetContainer.style.pointerEvents = 'none';
+  widgetContainer.style.position = 'fixed';
+  widgetContainer.style.left = '-9999px';
+  widgetContainer.style.width = '330px';
+  widgetContainer.style.height = '550px';
   miniOrb.style.display = 'flex';
-  // 更新悬浮球视频为当前状态
   setMiniOrbState(appState);
+
+  // Continuously capture Live2D canvas frames for animated mini-orb
+  const canvas = document.getElementById('live2d-canvas');
+  if (canvas) {
+    if (!miniOrbCropCanvas) {
+      miniOrbCropCanvas = document.createElement('canvas');
+      miniOrbCropCanvas.width = 128;
+      miniOrbCropCanvas.height = 128;
+      miniOrbCropCtx = miniOrbCropCanvas.getContext('2d');
+    }
+    let pendingBlob = false;
+    const captureFrame = () => {
+      if (pendingBlob) return;
+      try {
+        const cropH = canvas.height * 0.4;
+        const cropW = Math.min(canvas.width, cropH);
+        const sx = (canvas.width - cropW) / 2;
+        const sy = canvas.height * 0.05;
+        miniOrbCropCtx.clearRect(0, 0, 128, 128);
+        miniOrbCropCtx.drawImage(canvas, sx, sy, cropW, cropH, 0, 0, 128, 128);
+        pendingBlob = true;
+        miniOrbCropCanvas.toBlob((blob) => {
+          pendingBlob = false;
+          if (blob && isMiniMode) {
+            const url = URL.createObjectURL(blob);
+            const oldSrc = miniOrbAvatar.src;
+            miniOrbAvatar.src = url;
+            if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+          }
+        }, 'image/png');
+      } catch (e) {}
+    };
+    captureFrame();
+    miniOrbFrameInterval = setInterval(captureFrame, 16); // 60fps
+  }
 }
 
 function exitMiniMode() {
   console.log('[Orb] 退出迷你模式，恢复完整窗口');
   isMiniMode = false;
+  if (miniOrbFrameInterval) {
+    clearInterval(miniOrbFrameInterval);
+    miniOrbFrameInterval = null;
+  }
+  document.documentElement.classList.remove('mini-mode');
+  document.body.classList.remove('mini-mode');
   miniOrb.style.display = 'none';
   miniOrb.classList.remove('mini-listening', 'mini-thinking', 'mini-speaking');
-  widgetContainer.style.display = 'flex';
+  widgetContainer.style.opacity = '';
+  widgetContainer.style.pointerEvents = '';
+  widgetContainer.style.position = '';
+  widgetContainer.style.left = '';
+  widgetContainer.style.width = '';
+  widgetContainer.style.height = '';
 
   // 如果在聆听中恢复，保持聆听状态
   if (appState === 'listening' || appState === 'followup') {
@@ -1580,6 +1573,12 @@ minimizeBtn.addEventListener('click', (e) => {
 closeBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   window.electronAPI.closeWindow();
+});
+
+foldToggle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  bottomPanel.classList.toggle('folded');
+  foldToggle.classList.toggle('folded');
 });
 
 // ===== 文本输入处理 =====

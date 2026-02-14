@@ -1,5 +1,12 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+html, body { height: 100%; background: transparent; }
+html.mini-mode,
+html.mini-mode body {
+  background: transparent !important;
+  overflow: hidden !important;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: transparent;
@@ -8,19 +15,26 @@ body {
   -webkit-app-region: drag;
 }
 
+body.mini-mode,
+body.mini-mode html {
+  background: transparent !important;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
 /* ===== 浅色模式变量 ===== */
 :root {
-  --bg-primary: rgba(255, 255, 255, 0.95);
-  --bg-secondary: rgba(248, 250, 252, 0.95);
-  --bg-tertiary: rgba(241, 245, 249, 0.9);
+  --bg-primary: rgba(255, 255, 255, 0);
+  --bg-secondary: rgba(248, 250, 252, 0);
+  --bg-tertiary: rgba(241, 245, 249, 0);
   --text-primary: rgba(30, 41, 59, 0.95);
   --text-secondary: rgba(71, 85, 105, 0.8);
   --text-muted: rgba(100, 116, 139, 0.6);
   --border-color: rgba(203, 213, 225, 0.6);
   --border-hover: rgba(148, 163, 184, 0.8);
-  --accent-primary: #6366f1;
-  --accent-secondary: #8b5cf6;
-  --accent-light: rgba(99, 102, 241, 0.1);
+  --accent-primary: rgba(55, 53, 47, 0.85);
+  --accent-secondary: rgba(55, 53, 47, 0.65);
+  --accent-light: rgba(55, 53, 47, 0.06);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -28,27 +42,26 @@ body {
 
 /* ===== 悬浮球模式 ===== */
 .mini-orb {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
+  width: 80px;
+  height: 80px;
+  border-radius: 0;
   overflow: visible;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
-  border: 2px solid rgba(99, 102, 241, 0.3);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.2), var(--shadow-md);
-  animation: miniOrbBreath 3s ease-in-out infinite;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  animation: none;
   -webkit-app-region: no-drag;
   position: fixed;
   top: 0;
   left: 0;
 }
 
-.mini-orb:hover {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3), var(--shadow-lg);
+.mini-orb:hover .mini-orb-avatar {
+  transform: scale(1.05);
 }
 
 .mini-orb:active {
@@ -56,44 +69,16 @@ body {
 }
 
 .mini-orb-avatar {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   object-fit: cover;
   pointer-events: none;
 }
 
-/* 放大按钮 */
+/* 放大按钮 - hidden */
 .mini-expand-btn {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: all 0.2s;
-  z-index: 10;
-  -webkit-app-region: no-drag;
-  box-shadow: var(--shadow-sm);
-}
-
-.mini-orb:hover .mini-expand-btn {
-  opacity: 1;
-}
-
-.mini-expand-btn:hover {
-  background: #4f46e5;
-  transform: scale(1.15);
+  display: none;
 }
 
 /* 聆听脉冲指示 */
@@ -102,8 +87,8 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   pointer-events: none;
   z-index: -1;
@@ -112,34 +97,34 @@ body {
 
 /* ===== 悬浮球状态样式 ===== */
 
-/* 聆听状态 - 红色脉冲 */
+/* 聆听状态 */
 .mini-orb.mini-listening {
-  border-color: rgba(239, 68, 68, 0.6);
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.3), var(--shadow-md);
+  border-color: rgba(235, 87, 87, 0.4);
+  box-shadow: 0 1px 8px rgba(235, 87, 87, 0.15);
   animation: miniListenPulse 1.2s ease-in-out infinite;
 }
 
 .mini-orb.mini-listening .mini-pulse {
   opacity: 1;
   animation: miniPulseRipple 1.5s ease-out infinite;
-  border: 2px solid rgba(239, 68, 68, 0.4);
+  border: 1px solid rgba(235, 87, 87, 0.3);
 }
 
 @keyframes miniListenPulse {
   0%, 100% {
-    border-color: rgba(239, 68, 68, 0.4);
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.2), var(--shadow-md);
+    border-color: rgba(235, 87, 87, 0.3);
+    box-shadow: 0 1px 6px rgba(235, 87, 87, 0.1);
   }
   50% {
-    border-color: rgba(239, 68, 68, 0.7);
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), var(--shadow-lg);
+    border-color: rgba(235, 87, 87, 0.5);
+    box-shadow: 0 1px 10px rgba(235, 87, 87, 0.2);
   }
 }
 
 @keyframes miniPulseRipple {
   0% {
     transform: translate(-50%, -50%) scale(1);
-    opacity: 0.4;
+    opacity: 0.3;
   }
   100% {
     transform: translate(-50%, -50%) scale(2.2);
@@ -147,44 +132,44 @@ body {
   }
 }
 
-/* 思考状态 - 黄色 */
+/* 思考状态 */
 .mini-orb.mini-thinking {
-  border-color: rgba(245, 158, 11, 0.6);
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.3), var(--shadow-md);
+  border-color: rgba(55, 53, 47, 0.3);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.1);
   animation: miniThinkSpin 2s linear infinite;
 }
 
 @keyframes miniThinkSpin {
   0% {
-    border-color: rgba(245, 158, 11, 0.6);
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.3), var(--shadow-md);
+    border-color: rgba(55, 53, 47, 0.2);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
   }
   50% {
-    border-color: rgba(245, 158, 11, 0.8);
-    box-shadow: 0 0 24px rgba(245, 158, 11, 0.5), var(--shadow-lg);
+    border-color: rgba(55, 53, 47, 0.4);
+    box-shadow: 0 1px 10px rgba(0, 0, 0, 0.12);
   }
   100% {
-    border-color: rgba(245, 158, 11, 0.6);
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.3), var(--shadow-md);
+    border-color: rgba(55, 53, 47, 0.2);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
   }
 }
 
-/* 说话状态 - 紫色 */
+/* 说话状态 */
 .mini-orb.mini-speaking {
-  border-color: rgba(139, 92, 246, 0.6);
-  box-shadow: 0 0 16px rgba(139, 92, 246, 0.3), var(--shadow-md);
+  border-color: rgba(55, 53, 47, 0.25);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.1);
   animation: miniSpeakBreath 0.8s ease-in-out infinite;
 }
 
 @keyframes miniSpeakBreath {
   0%, 100% {
-    border-color: rgba(139, 92, 246, 0.5);
-    box-shadow: 0 0 12px rgba(139, 92, 246, 0.2), var(--shadow-md);
+    border-color: rgba(55, 53, 47, 0.2);
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
     transform: scale(1);
   }
   50% {
-    border-color: rgba(139, 92, 246, 0.8);
-    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4), var(--shadow-lg);
+    border-color: rgba(55, 53, 47, 0.35);
+    box-shadow: 0 1px 10px rgba(0, 0, 0, 0.12);
     transform: scale(1.05);
   }
 }
@@ -192,10 +177,10 @@ body {
 /* 默认呼吸动画 */
 @keyframes miniOrbBreath {
   0%, 100% {
-    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.2), var(--shadow-md);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   }
   50% {
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3), var(--shadow-lg);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
   }
 }
 
@@ -218,9 +203,11 @@ body {
   position: relative;
   margin: 16px 20px 0;
   padding: 14px 18px;
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
   border-radius: 18px;
-  border: 1px solid var(--border-color);
+  border: 1px solid rgba(255, 255, 255, 0.35);
   max-height: 120px;
   overflow-y: auto;
   animation: bubbleIn 0.3s ease-out;
@@ -399,9 +386,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
+  cursor: grab;
+  -webkit-app-region: drag;
   z-index: 1;
+  overflow: hidden;
 }
 
 .lobster-area canvas {
@@ -411,6 +399,18 @@ body {
   pointer-events: none;
 }
 
+/* Live2D canvas */
+#live2d-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* Legacy video styles (kept for mini-orb fallback) */
 .lobster-character {
   max-width: 100%;
   max-height: 100%;
@@ -447,17 +447,19 @@ body {
 /* ===== 点击开始对话引导 ===== */
 .tap-hint {
   position: absolute;
-  bottom: 16px;
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 18px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 20px;
+  gap: 5px;
+  padding: 4px 14px;
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 14px;
   animation: tapHintPulse 2s ease-in-out infinite, tapHintFloat 3s ease-in-out infinite;
   cursor: pointer;
   pointer-events: none;
@@ -466,8 +468,8 @@ body {
 }
 
 .tap-hint .tap-icon {
-  font-size: 18px;
-  color: var(--accent-primary);
+  font-size: 16px;
+  color: rgba(55, 53, 47, 0.5);
   animation: tapIconBounce 1.5s ease-in-out infinite;
 }
 
@@ -549,6 +551,59 @@ body {
   }
 }
 
+/* ===== Fold toggle ===== */
+.fold-toggle {
+  width: 32px; height: 18px;
+  border: none;
+  border-radius: 9px 9px 0 0;
+  background: rgba(100, 100, 120, 0.25);
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  padding: 0;
+  -webkit-app-region: no-drag;
+  transition: background 0.2s, transform 0.3s;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.fold-toggle:hover {
+  background: rgba(100, 100, 120, 0.45);
+}
+.fold-toggle .iconify {
+  font-size: 14px;
+  transition: transform 0.3s;
+}
+.fold-toggle.folded .iconify {
+  transform: rotate(180deg);
+}
+
+/* ===== Foldable bottom panel ===== */
+.bottom-panel {
+  width: 100%;
+  overflow: hidden;
+  max-height: 120px;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 16px 16px 24px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+  -webkit-app-region: drag;
+}
+.bottom-panel button,
+.bottom-panel input {
+  -webkit-app-region: no-drag;
+}
+.bottom-panel.folded {
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* ===== 底部状态栏 ===== */
 .bottom-bar {
   display: flex;
@@ -586,31 +641,30 @@ body {
 }
 
 .text-input:focus {
-  background: #fff;
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(55, 53, 47, 0.2);
+  box-shadow: none;
 }
 
 .send-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-  color: #fff;
-  font-size: 14px;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.4);
+  font-size: 15px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.15s;
   flex-shrink: 0;
-  box-shadow: var(--shadow-sm);
 }
 
 .send-btn:hover {
-  transform: scale(1.05);
-  box-shadow: var(--shadow-md);
+  background: rgba(55, 53, 47, 0.08);
+  color: rgba(55, 53, 47, 0.8);
 }
 
 .send-btn:active {
@@ -648,17 +702,17 @@ body {
 
 .tiny-btn {
   width: 24px; height: 24px;
-  border: none; border-radius: 50%;
-  background: var(--bg-tertiary);
-  color: var(--text-muted);
+  border: none; border-radius: 6px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.4);
   font-size: 14px;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
-.tiny-btn:hover { background: var(--bg-secondary); color: var(--text-primary); box-shadow: var(--shadow-sm); }
-.tiny-btn.close:hover { background: rgba(239, 68, 68, 0.1); color: #dc2626; }
+.tiny-btn:hover { background: rgba(55, 53, 47, 0.08); color: rgba(55, 53, 47, 0.8); }
+.tiny-btn.close:hover { background: rgba(235, 87, 87, 0.08); color: #eb5757; }
 
 /* ===== 动画 ===== */
 @keyframes lobsterFloat {

@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   restoreWindow: () => ipcRenderer.send('window:restore'),
   closeWindow: () => ipcRenderer.send('window:close'),
+  setWindowPosition: (x, y) => ipcRenderer.send('window:setPosition', x, y),
   onMiniMode: (callback) => {
     const handler = (event, isMini) => callback(isMini);
     ipcRenderer.on('window:miniMode', handler);

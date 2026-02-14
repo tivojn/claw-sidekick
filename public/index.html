@@ -11,12 +11,7 @@
 <body>
   <!-- Mini orb mode -->
   <div class="mini-orb" id="mini-orb" style="display: none;">
-    <video class="mini-orb-avatar" id="mini-orb-video" autoplay muted loop playsinline>
-      <source src="lobster-idle.mp4" type="video/mp4">
-    </video>
-    <button class="mini-expand-btn" id="mini-expand-btn" title="Expand">
-      <span class="iconify" data-icon="mdi:arrow-expand"></span>
-    </button>
+    <img class="mini-orb-avatar" id="mini-orb-avatar" src="" alt="" />
     <div class="mini-pulse"></div>
   </div>
 
@@ -36,9 +31,7 @@
       <div class="listening-pulse-ring hidden" id="listening-pulse-ring">
         <div class="ring-3"></div>
       </div>
-      <video class="lobster-character" id="lobster-char" autoplay muted playsinline>
-        <source src="lobster-welcome.mp4" type="video/mp4">
-      </video>
+      <canvas id="live2d-canvas"></canvas>
       <!-- Tap hint -->
       <div class="tap-hint" id="tap-hint">
         <span class="iconify tap-icon" data-icon="mdi:keyboard"></span>
@@ -46,34 +39,42 @@
       </div>
     </div>
 
-    <!-- Bottom bar -->
-    <div class="bottom-bar">
-      <div class="state-indicator" id="state-indicator">
-        <span class="state-dot"></span>
-        <span class="state-text" id="state-text">Type to start chatting</span>
-      </div>
-      <div class="widget-controls">
-        <button id="character-select-btn" class="tiny-btn" title="Switch character">
-          <span class="iconify" data-icon="mdi:account-switch"></span>
-        </button>
-        <button id="voice-select-btn" class="tiny-btn" title="Switch voice">
-          <span class="iconify" data-icon="mdi:music-note"></span>
-        </button>
-        <button id="minimize-btn" class="tiny-btn" title="Minimize">
-          <span class="iconify" data-icon="mdi:minus"></span>
-        </button>
-        <button id="close-btn" class="tiny-btn close" title="Close">
-          <span class="iconify" data-icon="mdi:close"></span>
-        </button>
-      </div>
-    </div>
+    <!-- Fold toggle -->
+    <button id="fold-toggle" class="fold-toggle" title="Toggle panel">
+      <span class="iconify" data-icon="mdi:chevron-down"></span>
+    </button>
 
-    <!-- Text input -->
-    <div class="text-input-area" id="text-input-area">
-      <input type="text" id="text-input" class="text-input" placeholder="Type a message..." />
-      <button id="send-btn" class="send-btn" title="Send">
-        <span class="iconify" data-icon="mdi:send"></span>
-      </button>
+    <!-- Foldable bottom panel -->
+    <div class="bottom-panel" id="bottom-panel">
+      <!-- Bottom bar -->
+      <div class="bottom-bar">
+        <div class="state-indicator" id="state-indicator">
+          <span class="state-dot"></span>
+          <span class="state-text" id="state-text">Type to start chatting</span>
+        </div>
+        <div class="widget-controls">
+          <button id="character-select-btn" class="tiny-btn" title="Switch character">
+            <span class="iconify" data-icon="mdi:account-switch"></span>
+          </button>
+          <button id="voice-select-btn" class="tiny-btn" title="Switch voice">
+            <span class="iconify" data-icon="mdi:music-note"></span>
+          </button>
+          <button id="minimize-btn" class="tiny-btn" title="Minimize">
+            <span class="iconify" data-icon="mdi:minus"></span>
+          </button>
+          <button id="close-btn" class="tiny-btn close" title="Close">
+            <span class="iconify" data-icon="mdi:close"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Text input -->
+      <div class="text-input-area" id="text-input-area">
+        <input type="text" id="text-input" class="text-input" placeholder="Type a message..." />
+        <button id="send-btn" class="send-btn" title="Send">
+          <span class="iconify" data-icon="mdi:send"></span>
+        </button>
+      </div>
     </div>
 
     <!-- Character select panel -->
@@ -104,7 +105,13 @@
     </div>
   </div>
 
+  <!-- Live2D dependencies (load order matters: Cubism Core → PixiJS v6 → pixi-live2d-display) -->
+  <script src="lib/live2dcubismcore.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.5.10/dist/browser/pixi.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js"></script>
+
   <script src="orb.js"></script>
+  <script src="live2d.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
