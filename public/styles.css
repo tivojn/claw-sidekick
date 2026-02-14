@@ -2011,9 +2011,14 @@ body.mini-mode html {
 
 .settings-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+.settings-row .settings-key-status {
+  width: 100%;
+  flex-basis: 100%;
 }
 
 .settings-label {
@@ -2255,6 +2260,30 @@ body.mini-mode html {
   color: rgba(255, 255, 255, 0.25);
 }
 
+.settings-eye-toggle {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+.settings-eye-toggle:hover {
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.settings-eye-toggle.visible {
+  color: rgba(129, 140, 248, 0.8);
+  border-color: rgba(129, 140, 248, 0.3);
+}
+
 .settings-key-save {
   padding: 5px 10px;
   border-radius: 6px;
@@ -2280,6 +2309,8 @@ body.mini-mode html {
   margin-top: 3px;
   color: rgba(255, 255, 255, 0.4);
   min-height: 14px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 .settings-key-status.success {
   color: rgba(74, 222, 128, 0.85);
@@ -2535,4 +2566,236 @@ body.mini-mode html {
 .settings-oauth-btn:hover {
   background: rgba(16, 185, 129, 0.2);
   border-color: rgba(16, 185, 129, 0.5);
+}
+
+/* ===== MCP Servers ===== */
+.mcp-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.mcp-server-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.15s;
+}
+
+.mcp-server-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.mcp-server-item.disabled {
+  opacity: 0.45;
+}
+
+.mcp-server-item.disabled .mcp-server-name {
+  text-decoration: line-through;
+}
+
+.mcp-server-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.mcp-server-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-server-cmd {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-server-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.mcp-server-controls .tiny-btn {
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+}
+
+.mcp-toggle {
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.mcp-toggle.on {
+  background: rgba(16, 185, 129, 0.6);
+}
+
+.mcp-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+
+.mcp-toggle.on::after {
+  transform: translateX(14px);
+}
+
+.mcp-empty-state {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  text-align: center;
+  padding: 12px 0;
+}
+
+.mcp-manual-details {
+  margin-top: 4px;
+}
+
+.mcp-manual-summary {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px 0;
+  list-style: none;
+  transition: color 0.15s;
+}
+
+.mcp-manual-summary::-webkit-details-marker { display: none; }
+
+.mcp-manual-summary:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.mcp-manual-form {
+  padding: 6px 0;
+}
+
+.mcp-manual-form .settings-row {
+  margin-bottom: 4px;
+}
+
+/* ===== Skills Discovery ===== */
+.skills-dir-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.skills-dir-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  font-family: monospace;
+}
+
+.skills-dir-remove {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+.skills-dir-remove:hover {
+  color: rgba(235, 87, 87, 0.8);
+}
+
+.skills-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.skills-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.skills-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: rgba(139, 92, 246, 0.8);
+  flex-shrink: 0;
+}
+
+.skills-info {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.skills-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.skills-desc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skills-count-badge {
+  font-size: 10px;
+  color: rgba(139, 92, 246, 0.7);
+  background: rgba(139, 92, 246, 0.1);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 4px;
 }

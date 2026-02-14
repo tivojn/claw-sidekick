@@ -6,6 +6,8 @@ const https = require('https');
 const http = require('http');
 const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const WebSocket = require('ws');
+const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
 require('dotenv').config();
 
 // 捕获 EPIPE 错误，防止后台运行时崩溃
@@ -169,12 +171,207 @@ class TaskManager {
 }
 
 const taskManager = new TaskManager();
+
+// ===== MCP Client Manager =====
+const MAX_TOOL_ROUNDS = 10;
+
+class MCPClientManager {
+  constructor() {
+    // Map<serverName, { client, transport, tools[] }>
+    this.connections = new Map();
+  }
+
+  async ensureConnected(serverName) {
+    if (this.connections.has(serverName)) return this.connections.get(serverName);
+
+    const servers = appSettings.mcpServers?.servers || {};
+    const cfg = servers[serverName];
+    if (!cfg || cfg.enabled === false) throw new Error(`MCP server "${serverName}" not found or disabled`);
+
+    console.log(`[MCP] Connecting to "${serverName}": ${cfg.command} ${(cfg.args || []).join(' ')}`);
+
+    // Wrap in a timeout so a slow npx download doesn't block forever
+    const connectWithTimeout = async () => {
+      const transport = new StdioClientTransport({
+        command: cfg.command,
+        args: cfg.args || [],
+        env: { ...process.env, ...(cfg.env || {}) }
+      });
+
+      const client = new Client({ name: 'claw-sidekick', version: '0.1.0' }, { capabilities: {} });
+      await client.connect(transport);
+
+      const { tools } = await client.listTools();
+      console.log(`[MCP] "${serverName}" connected — ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
+
+      const conn = { client, transport, tools };
+      this.connections.set(serverName, conn);
+      return conn;
+    };
+
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`MCP server "${serverName}" connection timed out (30s)`)), 30000)
+    );
+
+    return Promise.race([connectWithTimeout(), timeout]);
+  }
+
+  async connectAll() {
+    const servers = appSettings.mcpServers?.servers || {};
+    const enabled = Object.entries(servers).filter(([, s]) => s.enabled !== false);
+    if (enabled.length === 0) return;
+
+    const results = await Promise.allSettled(enabled.map(([name]) => this.ensureConnected(name)));
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === 'rejected') {
+        console.warn(`[MCP] Failed to connect "${enabled[i][0]}":`, results[i].reason?.message);
+      }
+    }
+  }
+
+  // Ensure all enabled servers are connected; returns true if any tools are available
+  async ensureAllConnected() {
+    const servers = appSettings.mcpServers?.servers || {};
+    const enabled = Object.entries(servers).filter(([, s]) => s.enabled !== false);
+    // Only try to connect servers not already connected
+    const unconnected = enabled.filter(([name]) => !this.connections.has(name));
+    if (unconnected.length > 0) {
+      console.log(`[MCP] Lazy-connecting ${unconnected.length} server(s)...`);
+      await Promise.allSettled(unconnected.map(([name]) => this.ensureConnected(name)));
+    }
+    return this.connections.size > 0;
+  }
+
+  getAllToolsAnthropic() {
+    const tools = [];
+    for (const [serverName, conn] of this.connections) {
+      for (const tool of conn.tools) {
+        tools.push({
+          name: tool.name,
+          description: tool.description || `Tool from ${serverName}`,
+          input_schema: tool.inputSchema || { type: 'object', properties: {} }
+        });
+      }
+    }
+    return tools;
+  }
+
+  getAllToolsOpenAI() {
+    const tools = [];
+    for (const [serverName, conn] of this.connections) {
+      for (const tool of conn.tools) {
+        tools.push({
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description || `Tool from ${serverName}`,
+            parameters: tool.inputSchema || { type: 'object', properties: {} }
+          }
+        });
+      }
+    }
+    return tools;
+  }
+
+  _findOwner(toolName) {
+    for (const [serverName, conn] of this.connections) {
+      if (conn.tools.some(t => t.name === toolName)) return { serverName, conn };
+    }
+    return null;
+  }
+
+  async callTool(toolName, args) {
+    const owner = this._findOwner(toolName);
+    if (!owner) throw new Error(`No MCP server owns tool "${toolName}"`);
+
+    try {
+      const result = await owner.conn.client.callTool({ name: toolName, arguments: args });
+      return result;
+    } catch (err) {
+      console.warn(`[MCP] Tool "${toolName}" failed, retrying after reconnect:`, err.message);
+      // Single retry: disconnect and reconnect
+      await this.disconnect(owner.serverName);
+      await this.ensureConnected(owner.serverName);
+      const newOwner = this._findOwner(toolName);
+      if (!newOwner) throw err;
+      return newOwner.conn.client.callTool({ name: toolName, arguments: args });
+    }
+  }
+
+  async disconnect(serverName) {
+    const conn = this.connections.get(serverName);
+    if (!conn) return;
+    this.connections.delete(serverName);
+    try { await conn.transport.close(); } catch (e) { console.warn(`[MCP] Error closing "${serverName}":`, e.message); }
+  }
+
+  async disconnectAll() {
+    const names = [...this.connections.keys()];
+    await Promise.allSettled(names.map(n => this.disconnect(n)));
+  }
+
+  getToolDescriptions() {
+    const descs = [];
+    for (const [, conn] of this.connections) {
+      for (const tool of conn.tools) {
+        descs.push(`- ${tool.name}: ${tool.description || '(no description)'}`);
+      }
+    }
+    return descs;
+  }
+}
+
+const mcpManager = new MCPClientManager();
+
 let deepgramClient = null;
 let deepgramLive = null;
 let currentSender = null;
 
 // ===== Conversation history for direct API providers =====
 let conversationHistory = [];
+function getSidekickSystemPrompt(provider, model) {
+  let prompt = `You are Claw Sidekick, a friendly and helpful AI desktop companion. You are powered by ${model} via ${provider}. If asked what you are, say you are Claw Sidekick powered by ${model}. Be concise in your responses.`;
+
+  // Inject MCP tool info — provider-dependent
+  const supportsToolUse = (provider === 'Anthropic' || provider.startsWith('OpenAI'));
+  const connectedToolDescs = mcpManager.getToolDescriptions();
+
+  if (supportsToolUse && connectedToolDescs.length > 0) {
+    prompt += '\n\nYou have access to the following MCP tools that you can call directly. Use them when the user asks you to interact with a browser, take screenshots, navigate pages, etc. The tools are:\n' + connectedToolDescs.join('\n');
+  } else {
+    // Awareness-only for providers that don't support tool calling
+    const servers = appSettings.mcpServers?.servers || {};
+    const enabledServers = Object.entries(servers).filter(([, s]) => s.enabled !== false);
+    if (enabledServers.length > 0) {
+      prompt += '\n\nThe user has the following MCP tool servers configured on their system (you CANNOT execute these directly — only mention them if asked what tools are set up):';
+      for (const [name, srv] of enabledServers) {
+        prompt += `\n- ${name}: ${srv.command} ${(srv.args || []).join(' ')}`;
+      }
+    }
+  }
+
+  // Inject discovered skills (awareness only)
+  const skills = appSettings.skills?.cachedSkills || [];
+  if (skills.length > 0) {
+    const invocable = skills.filter(s => s.userInvocable);
+    const other = skills.filter(s => !s.userInvocable);
+    prompt += '\n\nThe user has the following Claude Code skills installed locally:';
+    if (invocable.length > 0) {
+      prompt += '\nSlash-command skills (you CAN invoke these by including the command in your response, e.g. /tts "hello". The system will execute them automatically):';
+      for (const skill of invocable) {
+        prompt += `\n- /${skill.name}: ${skill.description || 'No description'}`;
+      }
+    }
+    if (other.length > 0) {
+      prompt += '\nOther skills:';
+      for (const skill of other) {
+        prompt += `\n- ${skill.name}: ${skill.description || 'No description'}`;
+      }
+    }
+  }
+
+  return prompt;
+}
 
 // ===== Clawdbot WebSocket 配置 =====
 const CLAWDBOT_PORT = process.env.CLAWDBOT_PORT || 18789;
@@ -741,27 +938,17 @@ async function validateOpenAIKey(apiKey) {
   return { valid: true, models };
 }
 
-async function chatWithOpenAI(message, apiKey, model) {
-  conversationHistory.push({ role: 'user', content: message });
-  // Keep last 20 messages
-  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
-
-  sentenceCounter = 0;
-  ttsQueueManager.startSession();
-  const splitter = new SentenceSplitter((sentence) => {
-    const id = ++sentenceCounter;
-    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
-    }
-    ttsQueueManager.enqueueSentence(sentence);
-  });
-
+// --- OpenAI streaming helper (single request, returns { text, toolCalls, finishReason }) ---
+function openaiStreamRequest(apiKey, model, messages, tools, splitter) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
+    const payload = {
       model: model || 'gpt-4o',
-      messages: [{ role: 'system', content: 'You are a helpful AI assistant.' }, ...conversationHistory],
+      messages,
       stream: true
-    });
+    };
+    if (tools && tools.length > 0) payload.tools = tools;
+
+    const body = JSON.stringify(payload);
     const options = {
       hostname: 'api.openai.com',
       path: '/v1/chat/completions',
@@ -773,7 +960,12 @@ async function chatWithOpenAI(message, apiKey, model) {
       },
       timeout: 120000
     };
+
     let accumulated = '';
+    // tool_calls streamed incrementally by index
+    const toolCallsMap = new Map(); // index -> { id, name, arguments }
+    let finishReason = null;
+
     const req = https.request(options, (res) => {
       if (res.statusCode >= 400) {
         let errData = '';
@@ -793,29 +985,54 @@ async function chatWithOpenAI(message, apiKey, model) {
           if (!line.startsWith('data: ')) continue;
           const payload = line.slice(6).trim();
           if (payload === '[DONE]') {
-            splitter.finish();
-            conversationHistory.push({ role: 'assistant', content: accumulated });
-            resolve(accumulated);
+            if (splitter) splitter.finish();
+            const toolCalls = [...toolCallsMap.values()].map(tc => {
+              let args = {};
+              try { args = JSON.parse(tc.arguments); } catch (_) {}
+              return { id: tc.id, name: tc.name, arguments: args, rawArguments: tc.arguments };
+            });
+            resolve({ text: accumulated, toolCalls, finishReason: finishReason || 'stop' });
             return;
           }
           try {
             const json = JSON.parse(payload);
-            const delta = json.choices?.[0]?.delta?.content;
+            const choice = json.choices?.[0];
+            if (!choice) continue;
+
+            if (choice.finish_reason) finishReason = choice.finish_reason;
+
+            // Text content
+            const delta = choice.delta?.content;
             if (delta) {
               accumulated += delta;
-              splitter.addText(delta);
+              if (splitter) splitter.addText(delta);
+            }
+
+            // Tool calls (streamed incrementally)
+            const dtc = choice.delta?.tool_calls;
+            if (dtc) {
+              for (const tc of dtc) {
+                const idx = tc.index;
+                if (!toolCallsMap.has(idx)) {
+                  toolCallsMap.set(idx, { id: tc.id || '', name: tc.function?.name || '', arguments: '' });
+                }
+                const entry = toolCallsMap.get(idx);
+                if (tc.id) entry.id = tc.id;
+                if (tc.function?.name) entry.name = tc.function.name;
+                if (tc.function?.arguments) entry.arguments += tc.function.arguments;
+              }
             }
           } catch (_) {}
         }
       });
       res.on('end', () => {
-        if (accumulated) {
-          splitter.finish();
-          conversationHistory.push({ role: 'assistant', content: accumulated });
-          resolve(accumulated);
-        } else {
-          reject(new Error('No response from OpenAI'));
-        }
+        if (splitter) splitter.finish();
+        const toolCalls = [...toolCallsMap.values()].map(tc => {
+          let args = {};
+          try { args = JSON.parse(tc.arguments); } catch (_) {}
+          return { id: tc.id, name: tc.name, arguments: args, rawArguments: tc.arguments };
+        });
+        resolve({ text: accumulated, toolCalls, finishReason: finishReason || 'stop' });
       });
     });
     req.on('error', (e) => reject(e));
@@ -823,6 +1040,83 @@ async function chatWithOpenAI(message, apiKey, model) {
     req.write(body);
     req.end();
   });
+}
+
+async function chatWithOpenAI(message, apiKey, model) {
+  conversationHistory.push({ role: 'user', content: message });
+  // Keep last 20 messages
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  // Lazy-connect MCP servers if not already connected
+  await mcpManager.ensureAllConnected();
+  const mcpTools = mcpManager.getAllToolsOpenAI();
+  console.log(`[MCP/OpenAI] ${mcpTools.length} tools available`);
+  const systemMsg = { role: 'system', content: getSidekickSystemPrompt('OpenAI', model || 'gpt-4o') };
+  const messages = [systemMsg, ...conversationHistory];
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Only pass splitter on the final text-producing round; for tool rounds use null
+    const isFirstRound = (round === 0);
+    const result = await openaiStreamRequest(apiKey, model, messages, mcpTools.length > 0 ? mcpTools : null, splitter);
+
+    if (result.finishReason === 'tool_calls' && result.toolCalls.length > 0) {
+      // Build assistant message with tool_calls for history
+      const assistantMsg = { role: 'assistant', content: result.text || null, tool_calls: result.toolCalls.map(tc => ({
+        id: tc.id, type: 'function', function: { name: tc.name, arguments: tc.rawArguments }
+      })) };
+      messages.push(assistantMsg);
+
+      // Notify frontend about tool use
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        for (const tc of result.toolCalls) {
+          mainWindow.webContents.send('mcp:toolCall', { tool: tc.name, args: tc.arguments });
+        }
+      }
+
+      // Execute each tool and push results
+      for (const tc of result.toolCalls) {
+        let toolResult;
+        try {
+          console.log(`[MCP/OpenAI] Calling tool: ${tc.name}`);
+          const mcpResult = await mcpManager.callTool(tc.name, tc.arguments);
+          // MCP returns { content: [{ type, text }] } — flatten to string
+          toolResult = (mcpResult.content || []).map(c => c.text || JSON.stringify(c)).join('\n');
+        } catch (err) {
+          toolResult = `Error: ${err.message}`;
+          console.error(`[MCP/OpenAI] Tool "${tc.name}" error:`, err.message);
+        }
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: toolResult });
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('mcp:toolResult', { tool: tc.name, result: toolResult.substring(0, 500) });
+        }
+      }
+
+      // Reset splitter for next round
+      splitter.reset();
+      continue;
+    }
+
+    // Done — text response
+    const finalText = result.text || 'No response from OpenAI';
+    conversationHistory.push({ role: 'assistant', content: finalText });
+    return finalText;
+  }
+
+  // Exhausted rounds
+  const fallback = 'I used the maximum number of tool calls. Here is what I have so far.';
+  conversationHistory.push({ role: 'assistant', content: fallback });
+  return fallback;
 }
 
 // ===== Gemini API =====
@@ -891,6 +1185,7 @@ async function chatWithGemini(message, apiKey, model) {
   return new Promise((resolve, reject) => {
     const modelId = model || 'gemini-2.0-flash';
     const body = JSON.stringify({
+      systemInstruction: { parts: [{ text: getSidekickSystemPrompt('Google Gemini', modelId) }] },
       contents: geminiHistory,
       generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
     });
@@ -995,28 +1290,19 @@ async function validateAnthropicKey(apiKey) {
   return { valid: true, models };
 }
 
-async function chatWithAnthropic(message, apiKey, model) {
-  conversationHistory.push({ role: 'user', content: message });
-  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
-
-  sentenceCounter = 0;
-  ttsQueueManager.startSession();
-  const splitter = new SentenceSplitter((sentence) => {
-    const id = ++sentenceCounter;
-    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
-    }
-    ttsQueueManager.enqueueSentence(sentence);
-  });
-
+// --- Anthropic streaming helper (single request, returns { text, contentBlocks, stopReason }) ---
+function anthropicStreamRequest(apiKey, model, systemPrompt, messages, tools, splitter) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({
+    const payload = {
       model: model || 'claude-sonnet-4-5-20250929',
-      max_tokens: 2048,
-      system: 'You are a helpful AI assistant.',
-      messages: conversationHistory,
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages,
       stream: true
-    });
+    };
+    if (tools && tools.length > 0) payload.tools = tools;
+
+    const body = JSON.stringify(payload);
     const options = {
       hostname: 'api.anthropic.com',
       path: '/v1/messages',
@@ -1029,7 +1315,13 @@ async function chatWithAnthropic(message, apiKey, model) {
       },
       timeout: 120000
     };
+
     let accumulated = '';
+    const contentBlocks = []; // { type: 'text'|'tool_use', ... }
+    let currentBlock = null;
+    let currentToolJson = '';
+    let stopReason = null;
+
     const req = https.request(options, (res) => {
       if (res.statusCode >= 400) {
         let errData = '';
@@ -1051,25 +1343,54 @@ async function chatWithAnthropic(message, apiKey, model) {
           if (!payload) continue;
           try {
             const json = JSON.parse(payload);
-            if (json.type === 'content_block_delta' && json.delta?.text) {
-              accumulated += json.delta.text;
-              splitter.addText(json.delta.text);
+
+            if (json.type === 'content_block_start') {
+              const cb = json.content_block;
+              if (cb.type === 'tool_use') {
+                currentBlock = { type: 'tool_use', id: cb.id, name: cb.name, input: {} };
+                currentToolJson = '';
+              } else if (cb.type === 'text') {
+                currentBlock = { type: 'text', text: '' };
+              }
             }
+
+            if (json.type === 'content_block_delta') {
+              if (json.delta?.type === 'text_delta' && json.delta.text) {
+                accumulated += json.delta.text;
+                if (currentBlock && currentBlock.type === 'text') currentBlock.text += json.delta.text;
+                if (splitter) splitter.addText(json.delta.text);
+              }
+              if (json.delta?.type === 'input_json_delta' && json.delta.partial_json !== undefined) {
+                currentToolJson += json.delta.partial_json;
+              }
+            }
+
+            if (json.type === 'content_block_stop') {
+              if (currentBlock) {
+                if (currentBlock.type === 'tool_use') {
+                  try { currentBlock.input = JSON.parse(currentToolJson); } catch (_) {}
+                }
+                contentBlocks.push(currentBlock);
+                currentBlock = null;
+                currentToolJson = '';
+              }
+            }
+
+            if (json.type === 'message_delta') {
+              if (json.delta?.stop_reason) stopReason = json.delta.stop_reason;
+            }
+
             if (json.type === 'message_stop') {
-              splitter.finish();
-              conversationHistory.push({ role: 'assistant', content: accumulated });
-              resolve(accumulated);
+              if (splitter) splitter.finish();
+              resolve({ text: accumulated, contentBlocks, stopReason: stopReason || 'end_turn' });
               return;
             }
           } catch (_) {}
         }
       });
       res.on('end', () => {
-        splitter.finish();
-        if (accumulated) {
-          conversationHistory.push({ role: 'assistant', content: accumulated });
-        }
-        resolve(accumulated || 'No response from Claude');
+        if (splitter) splitter.finish();
+        resolve({ text: accumulated, contentBlocks, stopReason: stopReason || 'end_turn' });
       });
     });
     req.on('error', (e) => reject(e));
@@ -1079,51 +1400,7 @@ async function chatWithAnthropic(message, apiKey, model) {
   });
 }
 
-// ===== Ollama (local) =====
-
-function ollamaRequest(method, path, body) {
-  return new Promise((resolve, reject) => {
-    const bodyStr = body ? JSON.stringify(body) : null;
-    const options = {
-      hostname: 'localhost',
-      port: 11434,
-      path,
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 10000
-    };
-    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        if (res.statusCode >= 400) {
-          reject(new Error(`Ollama HTTP ${res.statusCode}`));
-          return;
-        }
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Failed to parse Ollama response')); }
-      });
-    });
-    req.on('error', (e) => reject(new Error(`Ollama not reachable: ${e.message}`)));
-    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
-    if (bodyStr) req.write(bodyStr);
-    req.end();
-  });
-}
-
-async function validateOllama() {
-  const result = await ollamaRequest('GET', '/api/tags');
-  const models = (result.models || []).map(m => ({
-    id: m.name || m.model,
-    name: m.name || m.model,
-    size: m.size,
-    modified: m.modified_at
-  }));
-  return { valid: true, models };
-}
-
-async function chatWithOllama(message, model) {
+async function chatWithAnthropic(message, apiKey, model) {
   conversationHistory.push({ role: 'user', content: message });
   if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
 
@@ -1137,25 +1414,202 @@ async function chatWithOllama(message, model) {
     ttsQueueManager.enqueueSentence(sentence);
   });
 
+  // Lazy-connect MCP servers if not already connected
+  await mcpManager.ensureAllConnected();
+  const mcpTools = mcpManager.getAllToolsAnthropic();
+  console.log(`[MCP/Anthropic] ${mcpTools.length} tools available`);
+  const systemPrompt = getSidekickSystemPrompt('Anthropic', model || 'claude-sonnet-4-5-20250929');
+  const messages = [...conversationHistory];
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const result = await anthropicStreamRequest(apiKey, model, systemPrompt, messages, mcpTools.length > 0 ? mcpTools : null, splitter);
+
+    if (result.stopReason === 'tool_use') {
+      const toolBlocks = result.contentBlocks.filter(b => b.type === 'tool_use');
+      if (toolBlocks.length === 0) break;
+
+      // Push the assistant's content blocks (text + tool_use) into messages
+      messages.push({ role: 'assistant', content: result.contentBlocks });
+
+      // Notify frontend about tool use
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        for (const tb of toolBlocks) {
+          mainWindow.webContents.send('mcp:toolCall', { tool: tb.name, args: tb.input });
+        }
+      }
+
+      // Execute each tool and build tool_result messages
+      const toolResults = [];
+      for (const tb of toolBlocks) {
+        let toolContent;
+        try {
+          console.log(`[MCP/Anthropic] Calling tool: ${tb.name}`);
+          const mcpResult = await mcpManager.callTool(tb.name, tb.input);
+          toolContent = (mcpResult.content || []).map(c => c.text || JSON.stringify(c)).join('\n');
+        } catch (err) {
+          toolContent = `Error: ${err.message}`;
+          console.error(`[MCP/Anthropic] Tool "${tb.name}" error:`, err.message);
+        }
+        toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: toolContent });
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('mcp:toolResult', { tool: tb.name, result: toolContent.substring(0, 500) });
+        }
+      }
+
+      messages.push({ role: 'user', content: toolResults });
+
+      // Reset splitter for next round
+      splitter.reset();
+      continue;
+    }
+
+    // Done — text response
+    const finalText = result.text || 'No response from Claude';
+    conversationHistory.push({ role: 'assistant', content: finalText });
+    return finalText;
+  }
+
+  // Exhausted rounds
+  const fallback = 'I used the maximum number of tool calls. Here is what I have so far.';
+  conversationHistory.push({ role: 'assistant', content: fallback });
+  return fallback;
+}
+
+// ===== Ollama (local + cloud) =====
+// Local: http://localhost:11434 (no auth)
+// Cloud: https://ollama.com (Bearer OLLAMA_API_KEY)
+
+function ollamaIsCloud(apiKey) {
+  return !!(apiKey && apiKey.trim());
+}
+
+function ollamaRequest(method, path, body, apiKey) {
+  const cloud = ollamaIsCloud(apiKey);
+  return new Promise((resolve, reject) => {
+    const bodyStr = body ? JSON.stringify(body) : null;
+    let options;
+    if (cloud) {
+      options = { hostname: 'ollama.com', path, method, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, timeout: 15000 };
+    } else {
+      const localUrl = appSettings.providers?.ollama?.localUrl || 'http://localhost:11434';
+      const parsed = new URL(localUrl);
+      // Force IPv4 — Ollama binds to 127.0.0.1, but 'localhost' may resolve to ::1 (IPv6) on macOS
+      const hostname = (parsed.hostname === 'localhost') ? '127.0.0.1' : parsed.hostname;
+      options = { hostname, port: parsed.port || 11434, path, method, headers: { 'Content-Type': 'application/json' }, timeout: 10000 };
+    }
+    if (bodyStr) options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+    const transport = cloud ? https : http;
+    const req = transport.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 400) {
+          reject(new Error(`Ollama ${cloud ? 'Cloud' : 'Local'} HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
+          return;
+        }
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Failed to parse Ollama response')); }
+      });
+    });
+    req.on('error', (e) => reject(new Error(`Ollama ${cloud ? 'Cloud' : 'Local'} not reachable: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Ollama request timed out')); });
+    if (bodyStr) req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function validateOllama(apiKey) {
+  // Try local first, then cloud if apiKey provided
+  let localModels = [];
+  let cloudModels = [];
+  let localOk = false;
+
+  // Always try local
+  try {
+    const localResult = await ollamaRequest('GET', '/api/tags', null, null);
+    localModels = (localResult.models || []).map(m => ({
+      id: m.name || m.model,
+      name: `${m.name || m.model} (local)`,
+      size: m.size,
+      source: 'local'
+    }));
+    localOk = true;
+  } catch (e) {
+    console.log('[Ollama] Local not available:', e.message);
+  }
+
+  // Try cloud if API key provided
+  if (ollamaIsCloud(apiKey)) {
+    try {
+      const cloudResult = await ollamaRequest('GET', '/api/tags', null, apiKey);
+      cloudModels = (cloudResult.models || []).map(m => ({
+        id: m.name || m.model,
+        name: `${m.name || m.model} (cloud)`,
+        size: m.size,
+        source: 'cloud'
+      }));
+    } catch (e) {
+      console.log('[Ollama] Cloud not available:', e.message);
+      if (!localOk) throw new Error(`Ollama Cloud auth failed: ${e.message}`);
+    }
+  }
+
+  if (!localOk && cloudModels.length === 0) {
+    throw new Error('Ollama not reachable locally and no valid cloud key');
+  }
+
+  const allModels = [...cloudModels, ...localModels];
+  return { valid: true, models: allModels, localOk, cloudOk: cloudModels.length > 0 };
+}
+
+// Determine whether a model should use cloud or local Ollama.
+// If local is reachable and has this model, prefer local even when a cloud key exists.
+async function ollamaResolveCloud(model, apiKey) {
+  try {
+    const localResult = await ollamaRequest('GET', '/api/tags', null, null);
+    const localModels = (localResult.models || []).map(m => m.name || m.model);
+    if (localModels.includes(model)) return false; // local has it
+  } catch (_) {
+    // Local not reachable — fall through to cloud check
+  }
+  return ollamaIsCloud(apiKey); // use cloud if key exists
+}
+
+async function chatWithOllama(message, model, apiKey) {
+  conversationHistory.push({ role: 'user', content: message });
+  if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+
+  sentenceCounter = 0;
+  ttsQueueManager.startSession();
+  const splitter = new SentenceSplitter((sentence) => {
+    const id = ++sentenceCounter;
+    if (id === 1 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clawdbot:firstSentence', { text: sentence });
+    }
+    ttsQueueManager.enqueueSentence(sentence);
+  });
+
+  const cloud = await ollamaResolveCloud(model, apiKey);
+  console.log(`[Ollama] Routing "${model}" to ${cloud ? 'cloud' : 'local'}`);
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model: model || 'llama3.2',
-      messages: [{ role: 'system', content: 'You are a helpful AI assistant.' }, ...conversationHistory],
+      messages: [{ role: 'system', content: getSidekickSystemPrompt('Ollama' + (cloud ? ' Cloud' : ' Local'), model || 'llama3.2') }, ...conversationHistory],
       stream: true
     });
-    const options = {
-      hostname: 'localhost',
-      port: 11434,
-      path: '/api/chat',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body)
-      },
-      timeout: 120000
-    };
+    const transport = cloud ? https : http;
+    let options;
+    if (cloud) {
+      options = { hostname: 'ollama.com', path: '/api/chat', method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}`, 'Content-Length': Buffer.byteLength(body) }, timeout: 120000 };
+    } else {
+      const localUrl = appSettings.providers?.ollama?.localUrl || 'http://localhost:11434';
+      const parsed = new URL(localUrl);
+      const hostname = (parsed.hostname === 'localhost') ? '127.0.0.1' : parsed.hostname;
+      options = { hostname, port: parsed.port || 11434, path: '/api/chat', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 120000 };
+    }
     let accumulated = '';
-    const req = http.request(options, (res) => {
+    const req = transport.request(options, (res) => {
       if (res.statusCode >= 400) {
         let errData = '';
         res.on('data', (c) => { errData += c; });
@@ -1223,7 +1677,7 @@ async function executeAICommand(command) {
       return chatWithAnthropic(command, cfg.apiKey, cfg.model);
     }
     case 'ollama':
-      return chatWithOllama(command, appSettings.providers.ollama.model);
+      return chatWithOllama(command, appSettings.providers.ollama.model, appSettings.providers.ollama.apiKey);
     default:
       return chatWithClawdbot(command);
   }
@@ -1279,13 +1733,22 @@ ipcMain.handle('openclaw:executeCommand', async (event, command) => {
   try {
     const reply = await executeAICommand(command);
     console.log(`[CMD] ${provider} 回复: ${reply}`);
+    // Execute any skill commands found in the AI reply (e.g. /tts "hello")
+    executeSkillCommands(reply);
     // Include whether streaming TTS was initiated so renderer can avoid duplicate playback
     return { type: 'chat', data: null, message: reply, streamingTTSInitiated: sentenceCounter > 0 };
   } catch (error) {
-    console.error(`[CMD] ${provider} 调用失败:`, error.message);
-    const hint = provider === 'claude-code'
-      ? 'Claude Code CLI is unavailable. Make sure `claude` is installed and accessible.'
-      : 'Clawdbot is temporarily unavailable. Make sure the service is running.';
+    console.error(`[CMD] ${provider} 调用失败:`, error.message, error.stack);
+    let hint;
+    if (provider === 'claude-code') {
+      hint = 'Claude Code CLI is unavailable. Make sure `claude` is installed and accessible.';
+    } else if (provider === 'ollama') {
+      hint = `Ollama error: ${error.message}`;
+    } else if (provider === 'openai' || provider === 'gemini' || provider === 'anthropic') {
+      hint = `${provider.charAt(0).toUpperCase() + provider.slice(1)} error: ${error.message}`;
+    } else {
+      hint = 'Clawdbot is temporarily unavailable. Make sure the service is running.';
+    }
     return { type: 'chat', data: null, message: hint };
   }
 });
@@ -1311,8 +1774,31 @@ ipcMain.handle('task:cancel', async (event, taskId) => {
 });
 
 // ===== Connection Provider =====
+function maskKey(key) {
+  if (!key || key.length < 8) return key ? '****' : '';
+  return key.substring(0, 6) + '****' + key.substring(key.length - 4);
+}
+
 ipcMain.handle('connection:getProvider', () => {
-  return { provider: appSettings.connection?.provider || 'openclaw' };
+  const p = appSettings.providers || {};
+  return {
+    provider: appSettings.connection?.provider || 'openclaw',
+    keys: {
+      openai: p.openai?.apiKey || '',
+      gemini: p.gemini?.apiKey || '',
+      anthropic: p.anthropic?.apiKey || '',
+      ollama: p.ollama?.apiKey || '',
+      minimax: p.minimax?.apiKey || '',
+      groq: p.groq?.apiKey || ''
+    },
+    savedModels: {
+      openai: p.openai?.model || '',
+      gemini: p.gemini?.model || '',
+      anthropic: p.anthropic?.model || '',
+      ollama: p.ollama?.model || ''
+    },
+    ollamaLocalUrl: p.ollama?.localUrl || 'http://localhost:11434'
+  };
 });
 
 ipcMain.handle('connection:setClaudeCodePath', (event, cliPath) => {
@@ -1446,11 +1932,13 @@ ipcMain.handle('connection:setAnthropicKey', async (event, apiKey) => {
 });
 
 // Ollama
-ipcMain.handle('connection:validateOllama', async () => {
+ipcMain.handle('connection:validateOllama', async (event, apiKey) => {
   try {
-    const result = await validateOllama();
-    console.log(`[Connection] Ollama validated, ${result.models.length} models`);
-    return { success: true, models: result.models };
+    // Use provided key for validation, but don't save here (setOllamaKey handles saving)
+    const key = (apiKey && apiKey.trim()) ? apiKey.trim() : (appSettings.providers.ollama.apiKey || '');
+    const result = await validateOllama(key);
+    console.log(`[Connection] Ollama validated: local=${result.localOk}, cloud=${result.cloudOk}, ${result.models.length} models`);
+    return { success: true, models: result.models, localOk: result.localOk, cloudOk: result.cloudOk };
   } catch (e) {
     console.error('[Connection] Ollama validation failed:', e.message);
     return { success: false, error: e.message };
@@ -1459,11 +1947,24 @@ ipcMain.handle('connection:validateOllama', async () => {
 
 ipcMain.handle('connection:listOllamaModels', async () => {
   try {
-    const result = await validateOllama();
+    const key = appSettings.providers.ollama.apiKey;
+    const result = await validateOllama(key);
     return { success: true, models: result.models };
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('connection:setOllamaKey', async (event, apiKey) => {
+  appSettings.providers.ollama.apiKey = apiKey || '';
+  saveSettings();
+  return { success: true };
+});
+
+ipcMain.handle('connection:setOllamaLocalUrl', async (event, url) => {
+  appSettings.providers.ollama.localUrl = url || 'http://localhost:11434';
+  saveSettings();
+  return { success: true };
 });
 
 // Generic model setter
@@ -1478,14 +1979,326 @@ ipcMain.handle('connection:setModel', (event, provider, model) => {
 
 // OpenAI OAuth2 — open browser to get API key
 ipcMain.handle('connection:startOAuth', async (event, provider) => {
+  const { shell } = require('electron');
   if (provider === 'openai') {
-    // OpenAI doesn't have a public third-party OAuth2 API.
-    // Instead, open the API keys page so user can create/copy a key.
-    const { shell } = require('electron');
     shell.openExternal('https://platform.openai.com/api-keys');
-    return { success: true, message: 'Opened OpenAI API keys page. Copy your key and paste it here.' };
+    return { success: true, message: 'Opened OpenAI API keys page.' };
+  }
+  if (provider === 'ollama') {
+    shell.openExternal('https://ollama.com/settings/keys');
+    return { success: true, message: 'Opened Ollama API keys page.' };
   }
   return { success: false, error: 'OAuth not supported for this provider' };
+});
+
+// ===== MCP Servers =====
+
+function parseMcpGithubUrl(url) {
+  url = url.trim();
+  // npm package: @scope/pkg or pkg
+  if (/^@?[\w-]+\/?([\w-]+)?$/.test(url) && !url.includes('github.com')) {
+    return { command: 'npx', args: ['-y', url], env: {} };
+  }
+  // GitHub URL: https://github.com/owner/repo
+  const ghMatch = url.match(/github\.com\/([^/]+)\/([^/#?]+)/);
+  if (ghMatch) {
+    const [, owner, repo] = ghMatch;
+    return { command: 'npx', args: ['-y', `github:${owner}/${repo}`], env: {} };
+  }
+  // Fallback: treat as command
+  const parts = url.split(/\s+/);
+  return { command: parts[0], args: parts.slice(1), env: {} };
+}
+
+ipcMain.handle('mcp:getServers', () => {
+  return appSettings.mcpServers?.servers || {};
+});
+
+ipcMain.handle('mcp:addServer', (event, name, config) => {
+  appSettings.mcpServers = appSettings.mcpServers || { servers: {} };
+  appSettings.mcpServers.servers[name] = {
+    command: config.command || '',
+    args: config.args || [],
+    env: config.env || {},
+    enabled: true,
+    source: config.source || 'manual',
+    installedAt: new Date().toISOString()
+  };
+  saveSettings();
+  return { success: true };
+});
+
+ipcMain.handle('mcp:removeServer', (event, name) => {
+  if (appSettings.mcpServers?.servers?.[name]) {
+    mcpManager.disconnect(name).catch(() => {});
+    delete appSettings.mcpServers.servers[name];
+    saveSettings();
+    return { success: true };
+  }
+  return { success: false, error: 'Server not found' };
+});
+
+ipcMain.handle('mcp:getConnectedTools', () => {
+  const tools = [];
+  for (const [serverName, conn] of mcpManager.connections) {
+    for (const tool of conn.tools) {
+      tools.push({ server: serverName, name: tool.name, description: tool.description || '' });
+    }
+  }
+  return tools;
+});
+
+ipcMain.handle('mcp:reconnect', async () => {
+  console.log('[MCP] Manual reconnect requested');
+  await mcpManager.disconnectAll();
+  await mcpManager.connectAll();
+  const toolCount = mcpManager.getAllToolsAnthropic().length;
+  console.log(`[MCP] Reconnect complete — ${toolCount} tools available`);
+  return { success: true, toolCount };
+});
+
+ipcMain.handle('mcp:toggleServer', (event, name) => {
+  const srv = appSettings.mcpServers?.servers?.[name];
+  if (srv) {
+    srv.enabled = !srv.enabled;
+    saveSettings();
+    // Disconnect if disabled
+    if (!srv.enabled) mcpManager.disconnect(name).catch(() => {});
+    return { success: true, enabled: srv.enabled };
+  }
+  return { success: false, error: 'Server not found' };
+});
+
+ipcMain.handle('mcp:updateServer', (event, name, updates) => {
+  const srv = appSettings.mcpServers?.servers?.[name];
+  if (srv) {
+    Object.assign(srv, updates);
+    saveSettings();
+    return { success: true };
+  }
+  return { success: false, error: 'Server not found' };
+});
+
+ipcMain.handle('mcp:installFromUrl', (event, url) => {
+  try {
+    const parsed = parseMcpGithubUrl(url);
+    const name = url.includes('github.com')
+      ? url.match(/github\.com\/[^/]+\/([^/#?]+)/)?.[1] || 'mcp-server'
+      : url.replace(/^@/, '').replace(/\//g, '-');
+    appSettings.mcpServers = appSettings.mcpServers || { servers: {} };
+    appSettings.mcpServers.servers[name] = {
+      ...parsed,
+      enabled: true,
+      source: url,
+      installedAt: new Date().toISOString()
+    };
+    saveSettings();
+    return { success: true, name, config: appSettings.mcpServers.servers[name] };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ===== Skills Discovery =====
+
+function parseSkillMd(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const skill = { name: '', description: '', userInvocable: false };
+
+    // Try YAML frontmatter
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const fm = fmMatch[1];
+      const nameMatch = fm.match(/^name:\s*(.+)$/m);
+      const descMatch = fm.match(/^description:\s*(.+)$/m);
+      const invokeMatch = fm.match(/^user[_-]?invocable:\s*(true|yes)/mi);
+      if (nameMatch) skill.name = nameMatch[1].trim().replace(/^["']|["']$/g, '');
+      if (descMatch) skill.description = descMatch[1].trim().replace(/^["']|["']$/g, '');
+      if (invokeMatch) skill.userInvocable = true;
+    }
+
+    // Fallback: extract from markdown headings/first paragraph
+    if (!skill.name) {
+      const headingMatch = content.match(/^#\s+(.+)$/m);
+      if (headingMatch) skill.name = headingMatch[1].trim();
+    }
+    if (!skill.description) {
+      const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#') && !l.startsWith('---'));
+      if (lines.length > 0) skill.description = lines[0].trim().substring(0, 120);
+    }
+
+    return skill;
+  } catch (e) {
+    return null;
+  }
+}
+
+function resolveHome(dir) {
+  if (dir.startsWith('~/')) return path.join(os.homedir(), dir.slice(2));
+  return dir;
+}
+
+function scanSkillDirectories(dirs) {
+  const skills = [];
+  for (const dir of dirs) {
+    const resolved = resolveHome(dir);
+    try {
+      if (!fs.existsSync(resolved)) continue;
+      // Resolve symlinks
+      const realDir = fs.realpathSync(resolved);
+      const entries = fs.readdirSync(realDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillDir = path.join(realDir, entry.name);
+        const skillMd = path.join(skillDir, 'SKILL.md');
+        if (fs.existsSync(skillMd)) {
+          const parsed = parseSkillMd(skillMd);
+          if (parsed) {
+            if (!parsed.name) parsed.name = entry.name;
+            parsed.directory = dir;
+            parsed.lastScanned = new Date().toISOString();
+            skills.push(parsed);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[Skills] Failed to scan ${dir}:`, e.message);
+    }
+  }
+  return skills;
+}
+
+const { spawn } = require('child_process');
+
+/**
+ * Pick the right command + args to run a script based on its file extension.
+ */
+function getScriptRunner(scriptPath) {
+  const ext = path.extname(scriptPath).toLowerCase();
+  switch (ext) {
+    case '.sh':   return ['bash', [scriptPath]];
+    case '.py':   return ['python3', [scriptPath]];
+    case '.ts':   return ['npx', ['tsx', scriptPath]];
+    case '.js':   return ['node', [scriptPath]];
+    default:      return ['bash', [scriptPath]]; // assume shell-executable
+  }
+}
+
+/**
+ * Find the "main" script inside a skill's scripts/ directory.
+ * Priority: run.sh > main.* > skill-name.* > first script found.
+ */
+function findSkillScript(skillDir, skillName) {
+  const scriptsDir = path.join(skillDir, 'scripts');
+  if (!fs.existsSync(scriptsDir)) return null;
+
+  let candidates;
+  try {
+    candidates = fs.readdirSync(scriptsDir).filter(f => {
+      const full = path.join(scriptsDir, f);
+      return fs.statSync(full).isFile() && !f.startsWith('__') && !f.startsWith('.');
+    });
+  } catch { return null; }
+
+  if (candidates.length === 0) return null;
+
+  // 1) run.sh / run.py / run.* (explicit entry point)
+  const runFile = candidates.find(f => f.match(/^run\.\w+$/));
+  if (runFile) return path.join(scriptsDir, runFile);
+
+  // 2) main.sh / main.py / main.*
+  const mainFile = candidates.find(f => f.match(/^main\.\w+$/));
+  if (mainFile) return path.join(scriptsDir, mainFile);
+
+  // 3) File named after the skill (e.g. tts_play.sh for tts, voicebox.py for voicebox)
+  const namedFile = candidates.find(f => {
+    const base = f.replace(/\.\w+$/, '').replace(/[_-]/g, '');
+    const normalized = skillName.replace(/[_-]/g, '');
+    return base === normalized || base.startsWith(normalized);
+  });
+  if (namedFile) return path.join(scriptsDir, namedFile);
+
+  // 4) First executable-looking script (.sh > .py > .ts > .js > anything)
+  const priority = ['.sh', '.py', '.ts', '.js'];
+  for (const ext of priority) {
+    const found = candidates.find(f => f.endsWith(ext));
+    if (found) return path.join(scriptsDir, found);
+  }
+
+  return path.join(scriptsDir, candidates[0]);
+}
+
+/**
+ * Scan AI reply text for /skill-name "args" patterns and execute matching skills.
+ * Runs scripts detached so they don't block the response.
+ */
+function executeSkillCommands(text) {
+  if (!text) return;
+
+  const skills = appSettings.skills?.cachedSkills || [];
+  const invocable = skills.filter(s => s.userInvocable);
+  if (invocable.length === 0) return;
+
+  // Match /skill-name "quoted args" or /skill-name 'quoted args'
+  const pattern = /\/([a-zA-Z][a-zA-Z0-9_-]*)\s+["']([^"']+)["']/g;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const skillName = match[1];
+    const args = match[2];
+
+    const skill = invocable.find(s => s.name === skillName);
+    if (!skill) continue;
+
+    console.log(`[Skills] Executing /${skillName} with args: "${args}"`);
+
+    const skillDir = path.join(resolveHome(skill.directory), skillName);
+    const scriptPath = findSkillScript(skillDir, skillName);
+
+    if (!scriptPath) {
+      console.warn(`[Skills] No executable script found for /${skillName} in ${skillDir}`);
+      continue;
+    }
+
+    const [cmd, cmdArgs] = getScriptRunner(scriptPath);
+    try {
+      const child = spawn(cmd, [...cmdArgs, args], {
+        detached: true,
+        stdio: 'ignore',
+        cwd: skillDir,
+        env: { ...process.env }
+      });
+      child.unref();
+      console.log(`[Skills] Launched ${path.basename(scriptPath)} for /${skillName} (pid ${child.pid})`);
+    } catch (e) {
+      console.warn(`[Skills] Failed to execute /${skillName}:`, e.message);
+    }
+  }
+}
+
+ipcMain.handle('skills:getDirectories', () => {
+  return appSettings.skills?.directories || ['~/.claude/skills'];
+});
+
+ipcMain.handle('skills:setDirectories', (event, dirs) => {
+  appSettings.skills = appSettings.skills || { directories: [], cachedSkills: [] };
+  appSettings.skills.directories = dirs;
+  saveSettings();
+  return { success: true };
+});
+
+ipcMain.handle('skills:scan', () => {
+  const dirs = appSettings.skills?.directories || ['~/.claude/skills'];
+  const skills = scanSkillDirectories(dirs);
+  appSettings.skills = appSettings.skills || { directories: dirs, cachedSkills: [] };
+  appSettings.skills.cachedSkills = skills;
+  saveSettings();
+  return { success: true, skills, count: skills.length };
+});
+
+ipcMain.handle('skills:getCached', () => {
+  return appSettings.skills?.cachedSkills || [];
 });
 
 // ===== Deepgram STT =====
@@ -1666,7 +2479,7 @@ const DEFAULT_SETTINGS = {
     openai: { apiKey: '', model: 'gpt-4o' },
     gemini: { apiKey: '', model: 'gemini-2.0-flash' },
     anthropic: { apiKey: '', model: 'claude-sonnet-4-5-20250929' },
-    ollama: { model: 'llama3.2' }
+    ollama: { apiKey: '', model: 'llama3.2', localUrl: 'http://localhost:11434' }
   },
   avatars: {
     lobster: { ttsProvider: 'edge', edgeVoice: 'en-US-EmmaMultilingualNeural', minimaxVoice: 'English_Graceful_Lady' },
@@ -1678,7 +2491,9 @@ const DEFAULT_SETTINGS = {
   },
   stt: { provider: 'deepgram', groqModel: 'whisper-large-v3-turbo' },
   hotkey: null,
-  connection: { provider: 'openclaw', claudeCodePath: '' }
+  connection: { provider: 'openclaw', claudeCodePath: '' },
+  mcpServers: { servers: {} },
+  skills: { directories: ['~/.claude/skills'], cachedSkills: [] }
 };
 
 let appSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -1754,6 +2569,20 @@ function saveSettings() {
 
 // Load on startup
 loadSettings();
+
+// Auto-scan skills on startup so AI is always aware of them
+try {
+  const dirs = appSettings.skills?.directories || ['~/.claude/skills'];
+  const skills = scanSkillDirectories(dirs);
+  if (skills.length > 0) {
+    appSettings.skills = appSettings.skills || { directories: dirs, cachedSkills: [] };
+    appSettings.skills.cachedSkills = skills;
+    saveSettings();
+    console.log(`[Skills] Auto-scanned ${skills.length} skills on startup`);
+  }
+} catch (e) {
+  console.warn('[Skills] Auto-scan failed:', e.message);
+}
 
 // 核心 TTS 函数（使用 edge-tts CLI）
 async function callEdgeTTS(text) {
@@ -2412,6 +3241,14 @@ app.whenReady().then(() => {
   }).catch(err => {
     console.warn('[启动] Clawdbot 预连接失败（首次对话时会重试）:', err.message);
   });
+  // Connect MCP servers in background (3s delay, non-blocking)
+  setTimeout(() => {
+    mcpManager.connectAll().then(() => {
+      console.log('[启动] MCP servers connected');
+    }).catch(err => {
+      console.warn('[启动] MCP connectAll error:', err.message);
+    });
+  }, 3000);
   // Register default PTT shortcut (Option+Z)
   const savedCombo = appSettings.hotkey || { alt: true, code: 'KeyZ' };
   registerPTTShortcut(savedCombo);
@@ -2426,9 +3263,15 @@ app.on('window-all-closed', () => {
   if (deepgramLive) { try { deepgramLive.finish(); } catch (e) {} deepgramLive = null; }
   // 清理 TTS 队列
   ttsQueueManager.reset();
+  // Disconnect MCP servers
+  mcpManager.disconnectAll().catch(() => {});
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  mcpManager.disconnectAll().catch(() => {});
 });
 
 app.on('activate', () => {

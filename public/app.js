@@ -2291,14 +2291,43 @@ async function openGlobalSettingsPanel() {
   // Update hotkey
   updateHotkeyUI();
 
-  // Load connection provider state
+  // Load connection provider state + populate masked keys
   try {
     const conn = await window.electronAPI.connection.getProvider();
     const activeProvider = conn.provider || 'openclaw';
     updateConnectionUI(activeProvider);
+
+    // Populate saved keys into password fields (eye-toggle reveals them)
+    const keyMap = {
+      'openai-key': conn.keys?.openai,
+      'gemini-key': conn.keys?.gemini,
+      'anthropic-key': conn.keys?.anthropic,
+      'ollama-cloud-key': conn.keys?.ollama,
+      'settings-minimax-key': conn.keys?.minimax,
+      'settings-groq-key': conn.keys?.groq
+    };
+    for (const [id, key] of Object.entries(keyMap)) {
+      const input = document.getElementById(id);
+      if (input && key) {
+        input.value = key;
+        input.type = 'password';
+      }
+    }
+
+    // Populate Ollama local URL
+    const ollamaUrlInput = document.getElementById('ollama-local-url');
+    if (ollamaUrlInput && conn.ollamaLocalUrl) ollamaUrlInput.value = conn.ollamaLocalUrl;
   } catch (e) {
     updateConnectionUI('openclaw');
   }
+
+  // Load MCP servers and skills
+  renderMcpServerList();
+  renderSkillsDirList();
+  try {
+    const cached = await window.electronAPI.skills.getCached();
+    renderSkillsList(cached);
+  } catch (e) {}
 
   panel.style.display = 'flex';
   onPanelOpen();
@@ -2309,6 +2338,74 @@ function closeGlobalSettingsPanel() {
   if (panel) panel.style.display = 'none';
   stopCapturing();
   onPanelClose();
+}
+
+// ===== MCP Servers UI =====
+async function renderMcpServerList() {
+  const container = document.getElementById('mcp-server-list');
+  if (!container) return;
+  try {
+    const servers = await window.electronAPI.mcp.getServers();
+    const entries = Object.entries(servers);
+    if (entries.length === 0) {
+      container.innerHTML = '<div class="mcp-empty-state">No MCP servers configured</div>';
+      return;
+    }
+    container.innerHTML = entries.map(([name, srv]) => {
+      const disabled = srv.enabled === false ? ' disabled' : '';
+      const toggleOn = srv.enabled !== false ? ' on' : '';
+      const cmdStr = `${srv.command} ${(srv.args || []).join(' ')}`;
+      return `<div class="mcp-server-item${disabled}" data-name="${name}">
+        <div class="mcp-server-info">
+          <div class="mcp-server-name">${name}</div>
+          <div class="mcp-server-cmd">${cmdStr}</div>
+        </div>
+        <div class="mcp-server-controls">
+          <button class="mcp-toggle${toggleOn}" data-action="toggle" title="Enable/disable"></button>
+          <button class="tiny-btn" data-action="remove" title="Remove">
+            <span class="iconify" data-icon="mdi:delete-outline"></span>
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="mcp-empty-state">Failed to load servers</div>';
+  }
+}
+
+async function renderSkillsDirList() {
+  const container = document.getElementById('skills-dir-list');
+  if (!container) return;
+  try {
+    const dirs = await window.electronAPI.skills.getDirectories();
+    container.innerHTML = dirs.map(dir =>
+      `<span class="skills-dir-tag" data-dir="${dir}">
+        ${dir}
+        <button class="skills-dir-remove" data-action="remove-dir" title="Remove">&times;</button>
+      </span>`
+    ).join('');
+  } catch (e) {
+    container.innerHTML = '';
+  }
+}
+
+function renderSkillsList(skills) {
+  const container = document.getElementById('skills-list');
+  if (!container) return;
+  if (!skills || skills.length === 0) {
+    container.innerHTML = '<div class="mcp-empty-state">No skills discovered</div>';
+    return;
+  }
+  container.innerHTML = skills.map(s => {
+    const icon = s.userInvocable ? 'mdi:slash-forward' : 'mdi:puzzle-outline';
+    return `<div class="skills-item">
+      <div class="skills-icon"><span class="iconify" data-icon="${icon}"></span></div>
+      <div class="skills-info">
+        <div class="skills-name">${s.userInvocable ? '/' : ''}${s.name}</div>
+        <div class="skills-desc">${s.description || 'No description'}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // Update connection item UI to reflect active provider
@@ -2588,6 +2685,21 @@ async function loadKeyStatuses() {
 
 // Wire up settings panel events
 document.addEventListener('DOMContentLoaded', () => {
+  // Eye toggle for all password fields
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.settings-eye-toggle');
+    if (!btn) return;
+    e.stopPropagation();
+    const targetId = btn.dataset.target;
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const isPassword = input.type === 'password';
+    input.type = isPassword ? 'text' : 'password';
+    btn.classList.toggle('visible', isPassword);
+    const icon = btn.querySelector('.iconify');
+    if (icon) icon.dataset.icon = isPassword ? 'mdi:eye-outline' : 'mdi:eye-off-outline';
+  });
+
   // TTS settings button (speaker icon)
   const ttsBtn = document.getElementById('tts-settings-btn');
   if (ttsBtn) {
@@ -2658,6 +2770,118 @@ document.addEventListener('DOMContentLoaded', () => {
       settingsState.groqModel = model;
       updateSettingsPills('settings-groq-model-pills', 'model', model);
       await window.electronAPI.stt.setGroqModel(model);
+    });
+  }
+
+  // MCP: Install from URL
+  const mcpUrlAdd = document.getElementById('mcp-url-add');
+  if (mcpUrlAdd) {
+    mcpUrlAdd.addEventListener('click', async () => {
+      const input = document.getElementById('mcp-url-input');
+      const url = input?.value?.trim();
+      if (!url) return;
+      const result = await window.electronAPI.mcp.installFromUrl(url);
+      if (result.success) {
+        input.value = '';
+        renderMcpServerList();
+      }
+    });
+  }
+
+  // MCP: Manual add
+  const mcpManualAdd = document.getElementById('mcp-manual-add');
+  if (mcpManualAdd) {
+    mcpManualAdd.addEventListener('click', async () => {
+      const name = document.getElementById('mcp-manual-name')?.value?.trim();
+      const command = document.getElementById('mcp-manual-command')?.value?.trim();
+      const argsStr = document.getElementById('mcp-manual-args')?.value?.trim();
+      const envStr = document.getElementById('mcp-manual-env')?.value?.trim();
+      if (!name || !command) return;
+      const args = argsStr ? argsStr.split(/\s+/) : [];
+      const env = {};
+      if (envStr) {
+        envStr.split(',').forEach(pair => {
+          const [k, ...v] = pair.split('=');
+          if (k) env[k.trim()] = v.join('=').trim();
+        });
+      }
+      await window.electronAPI.mcp.addServer(name, { command, args, env, source: 'manual' });
+      document.getElementById('mcp-manual-name').value = '';
+      document.getElementById('mcp-manual-command').value = '';
+      document.getElementById('mcp-manual-args').value = '';
+      document.getElementById('mcp-manual-env').value = '';
+      renderMcpServerList();
+    });
+  }
+
+  // MCP: Server list toggle/remove (event delegation)
+  const mcpList = document.getElementById('mcp-server-list');
+  if (mcpList) {
+    mcpList.addEventListener('click', async (e) => {
+      const item = e.target.closest('.mcp-server-item');
+      if (!item) return;
+      const name = item.dataset.name;
+      const action = e.target.closest('[data-action]')?.dataset?.action;
+      if (action === 'toggle') {
+        await window.electronAPI.mcp.toggleServer(name);
+        renderMcpServerList();
+      } else if (action === 'remove') {
+        await window.electronAPI.mcp.removeServer(name);
+        renderMcpServerList();
+      }
+    });
+  }
+
+  // Skills: Scan button
+  const skillsScanBtn = document.getElementById('skills-scan-btn');
+  if (skillsScanBtn) {
+    skillsScanBtn.addEventListener('click', async () => {
+      skillsScanBtn.disabled = true;
+      skillsScanBtn.textContent = 'Scanning...';
+      try {
+        const result = await window.electronAPI.skills.scan();
+        renderSkillsList(result.skills || []);
+        skillsScanBtn.innerHTML = `<span class="iconify" data-icon="mdi:magnify-scan" style="margin-right:2px"></span> Scan`;
+        if (result.count > 0) {
+          skillsScanBtn.innerHTML += ` <span class="skills-count-badge">${result.count}</span>`;
+        }
+      } catch (e) {
+        skillsScanBtn.textContent = 'Error';
+      }
+      skillsScanBtn.disabled = false;
+    });
+  }
+
+  // Skills: Add directory
+  const skillsDirAdd = document.getElementById('skills-dir-add');
+  if (skillsDirAdd) {
+    skillsDirAdd.addEventListener('click', async () => {
+      const input = document.getElementById('skills-dir-input');
+      const dir = input?.value?.trim();
+      if (!dir) return;
+      const dirs = await window.electronAPI.skills.getDirectories();
+      if (!dirs.includes(dir)) {
+        dirs.push(dir);
+        await window.electronAPI.skills.setDirectories(dirs);
+      }
+      input.value = '';
+      renderSkillsDirList();
+    });
+  }
+
+  // Skills: Remove directory (event delegation)
+  const skillsDirList = document.getElementById('skills-dir-list');
+  if (skillsDirList) {
+    skillsDirList.addEventListener('click', async (e) => {
+      const removeBtn = e.target.closest('[data-action="remove-dir"]');
+      if (!removeBtn) return;
+      const tag = removeBtn.closest('.skills-dir-tag');
+      const dir = tag?.dataset?.dir;
+      if (!dir) return;
+      const dirs = await window.electronAPI.skills.getDirectories();
+      const updated = dirs.filter(d => d !== dir);
+      await window.electronAPI.skills.setDirectories(updated);
+      renderSkillsDirList();
     });
   }
 
@@ -2882,33 +3106,83 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Ollama detect
+  // Ollama detect — saves local URL first, then detects local + cloud
   const ollamaDetectBtn = document.getElementById('ollama-detect-btn');
   if (ollamaDetectBtn) {
     ollamaDetectBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const label = document.getElementById('ollama-detect-label');
       const status = document.getElementById('ollama-key-status');
-      if (label) label.textContent = 'Detecting...';
+      const urlInput = document.getElementById('ollama-local-url');
+      const localUrl = urlInput ? urlInput.value.trim() : 'http://localhost:11434';
+      // Save local URL config
+      await window.electronAPI.connection.setOllamaLocalUrl(localUrl);
+      if (status) { status.textContent = 'Detecting...'; status.className = 'settings-key-status'; }
       try {
-        const result = await window.electronAPI.connection.validateOllama();
+        // Pass undefined so backend uses saved cloud key (doesn't overwrite it)
+        const result = await window.electronAPI.connection.validateOllama(undefined);
         if (result.success) {
-          if (label) label.textContent = `Running (${result.models.length} models)`;
-          if (status) { status.textContent = ''; status.className = 'settings-key-status'; }
+          const parts = [];
+          if (result.localOk) parts.push('Local');
+          if (result.cloudOk) parts.push('Cloud');
+          if (status) { status.textContent = `${parts.join(' + ')} connected — ${result.models.length} models`; status.className = 'settings-key-status success'; }
           populateModelSelect('ollama-model-select', result.models, result.models[0]?.id);
+          const modelRow = document.getElementById('ollama-model-row');
+          if (modelRow) modelRow.style.display = '';
           const connStatus = document.getElementById('ollama-conn-status');
           if (connStatus) {
             connStatus.className = 'connection-status connected';
             connStatus.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
           }
         } else {
-          if (label) label.textContent = 'Not running';
           if (status) { status.textContent = result.error || 'Ollama not found'; status.className = 'settings-key-status error'; }
         }
       } catch (err) {
-        if (label) label.textContent = 'Not running';
         if (status) { status.textContent = err.message; status.className = 'settings-key-status error'; }
       }
+    });
+  }
+
+  // Ollama cloud key save
+  const ollamaCloudSaveBtn = document.getElementById('ollama-cloud-save');
+  if (ollamaCloudSaveBtn) {
+    ollamaCloudSaveBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const keyInput = document.getElementById('ollama-cloud-key');
+      const status = document.getElementById('ollama-cloud-status');
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      if (!apiKey) {
+        if (status) { status.textContent = 'Enter a cloud API key first'; status.className = 'settings-key-status error'; }
+        return;
+      }
+      if (status) { status.textContent = 'Validating...'; status.className = 'settings-key-status'; }
+      try {
+        await window.electronAPI.connection.setOllamaKey(apiKey);
+        const result = await window.electronAPI.connection.validateOllama(apiKey);
+        if (result.success) {
+          if (status) { status.textContent = `Cloud connected (${result.models.length} models)`; status.className = 'settings-key-status success'; }
+          populateModelSelect('ollama-model-select', result.models, result.models[0]?.id);
+          const modelRow = document.getElementById('ollama-model-row');
+          if (modelRow) modelRow.style.display = '';
+          const connStatus = document.getElementById('ollama-conn-status');
+          if (connStatus) {
+            connStatus.className = 'connection-status connected';
+            connStatus.innerHTML = '<span class="iconify" data-icon="mdi:check-circle"></span>';
+          }
+        } else {
+          if (status) { status.textContent = result.error || 'Cloud validation failed'; status.className = 'settings-key-status error'; }
+        }
+      } catch (err) {
+        if (status) { status.textContent = err.message; status.className = 'settings-key-status error'; }
+      }
+    });
+  }
+
+  // Ollama sign-in button (open ollama.com/settings/keys)
+  const ollamaSigninBtn = document.getElementById('ollama-signin-btn');
+  if (ollamaSigninBtn) {
+    ollamaSigninBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.electronAPI.connection.startOAuth('ollama');
     });
   }
 

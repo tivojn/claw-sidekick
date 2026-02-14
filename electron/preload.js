@@ -116,8 +116,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listAnthropicModels: () => ipcRenderer.invoke('connection:listAnthropicModels'),
     setAnthropicKey: (apiKey) => ipcRenderer.invoke('connection:setAnthropicKey', apiKey),
     // Ollama
-    validateOllama: () => ipcRenderer.invoke('connection:validateOllama'),
+    validateOllama: (apiKey) => ipcRenderer.invoke('connection:validateOllama', apiKey),
     listOllamaModels: () => ipcRenderer.invoke('connection:listOllamaModels'),
+    setOllamaKey: (apiKey) => ipcRenderer.invoke('connection:setOllamaKey', apiKey),
+    setOllamaLocalUrl: (url) => ipcRenderer.invoke('connection:setOllamaLocalUrl', url),
     // Generic
     setModel: (provider, model) => ipcRenderer.invoke('connection:setModel', provider, model),
     startOAuth: (provider) => ipcRenderer.invoke('connection:startOAuth', provider)
@@ -169,5 +171,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   file: {
     // 在 Finder 中显示文件
     showInFolder: (filePath) => ipcRenderer.invoke('file:showInFolder', filePath)
+  },
+
+  // MCP Servers
+  mcp: {
+    getServers: () => ipcRenderer.invoke('mcp:getServers'),
+    addServer: (name, config) => ipcRenderer.invoke('mcp:addServer', name, config),
+    removeServer: (name) => ipcRenderer.invoke('mcp:removeServer', name),
+    toggleServer: (name) => ipcRenderer.invoke('mcp:toggleServer', name),
+    updateServer: (name, updates) => ipcRenderer.invoke('mcp:updateServer', name, updates),
+    installFromUrl: (url) => ipcRenderer.invoke('mcp:installFromUrl', url)
+  },
+
+  // Skills Discovery
+  skills: {
+    getDirectories: () => ipcRenderer.invoke('skills:getDirectories'),
+    setDirectories: (dirs) => ipcRenderer.invoke('skills:setDirectories', dirs),
+    scan: () => ipcRenderer.invoke('skills:scan'),
+    getCached: () => ipcRenderer.invoke('skills:getCached')
   }
 });

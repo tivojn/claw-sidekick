@@ -198,6 +198,7 @@
             <span class="settings-label">MiniMax</span>
             <div class="settings-key-input-row">
               <input type="password" class="settings-input" id="settings-minimax-key" placeholder="Enter API Key" />
+              <button class="settings-eye-toggle" data-target="settings-minimax-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
               <button class="settings-key-save" id="settings-minimax-save">Save</button>
             </div>
             <div class="settings-key-status" id="settings-minimax-status"></div>
@@ -206,6 +207,7 @@
             <span class="settings-label">Groq</span>
             <div class="settings-key-input-row">
               <input type="password" class="settings-input" id="settings-groq-key" placeholder="Enter API Key" />
+              <button class="settings-eye-toggle" data-target="settings-groq-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
               <button class="settings-key-save" id="settings-groq-save">Save</button>
             </div>
             <div class="settings-key-status" id="settings-groq-status"></div>
@@ -289,6 +291,7 @@
               <span class="settings-label">API Key</span>
               <div class="settings-key-input-row">
                 <input type="password" class="settings-input" id="openai-key" placeholder="sk-..." />
+                <button class="settings-eye-toggle" data-target="openai-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
                 <button class="settings-key-save" id="openai-key-save">Save</button>
               </div>
               <div class="settings-key-status" id="openai-key-status"></div>
@@ -309,6 +312,7 @@
               <span class="settings-label">API Key</span>
               <div class="settings-key-input-row">
                 <input type="password" class="settings-input" id="gemini-key" placeholder="AIza..." />
+                <button class="settings-eye-toggle" data-target="gemini-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
                 <button class="settings-key-save" id="gemini-key-save">Save</button>
               </div>
               <div class="settings-key-status" id="gemini-key-status"></div>
@@ -325,6 +329,7 @@
               <span class="settings-label">API Key</span>
               <div class="settings-key-input-row">
                 <input type="password" class="settings-input" id="anthropic-key" placeholder="sk-ant-..." />
+                <button class="settings-eye-toggle" data-target="anthropic-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
                 <button class="settings-key-save" id="anthropic-key-save">Save</button>
               </div>
               <div class="settings-key-status" id="anthropic-key-status"></div>
@@ -338,17 +343,107 @@
           <!-- Ollama config -->
           <div class="settings-provider-config" id="settings-ollama-config" style="display: none;">
             <div class="settings-row">
-              <span class="settings-label">Status</span>
+              <span class="settings-label">Local URL</span>
               <div class="settings-key-input-row">
-                <span class="settings-label" id="ollama-detect-label" style="flex:1">Not checked</span>
+                <input type="text" class="settings-input" id="ollama-local-url" placeholder="http://localhost:11434" value="http://localhost:11434" />
                 <button class="settings-key-save" id="ollama-detect-btn">Detect</button>
               </div>
               <div class="settings-key-status" id="ollama-key-status"></div>
             </div>
+            <div class="settings-row">
+              <span class="settings-label">Cloud Key</span>
+              <div class="settings-key-input-row">
+                <input type="password" class="settings-input" id="ollama-cloud-key" placeholder="Ollama API key (optional)" />
+                <button class="settings-eye-toggle" data-target="ollama-cloud-key" title="Show/hide key"><span class="iconify" data-icon="mdi:eye-off-outline"></span></button>
+                <button class="settings-key-save" id="ollama-cloud-save">Save</button>
+              </div>
+              <div class="settings-key-status" id="ollama-cloud-status"></div>
+            </div>
+            <button class="settings-oauth-btn" id="ollama-signin-btn">
+              <span class="iconify" data-icon="mdi:open-in-new" style="margin-right:4px"></span>
+              Get API Key from ollama.com
+            </button>
             <div class="settings-row" id="ollama-model-row" style="display: none;">
               <span class="settings-label">Model</span>
               <select class="settings-model-select" id="ollama-model-select"></select>
             </div>
+          </div>
+        </div>
+
+        <!-- MCP Servers Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:server-network"></span>
+            <span>MCP Servers</span>
+          </div>
+
+          <!-- Install from URL -->
+          <div class="settings-row">
+            <span class="settings-label">Install from URL</span>
+            <div class="settings-key-input-row">
+              <input type="text" class="settings-input" id="mcp-url-input" placeholder="GitHub URL or npm package..." />
+              <button class="settings-key-save" id="mcp-url-add">Add</button>
+            </div>
+          </div>
+
+          <!-- Manual Setup (collapsible) -->
+          <details class="mcp-manual-details">
+            <summary class="mcp-manual-summary">
+              <span class="iconify" data-icon="mdi:plus-circle-outline" style="margin-right:4px"></span>
+              Manual Setup
+            </summary>
+            <div class="mcp-manual-form">
+              <div class="settings-row">
+                <span class="settings-label">Name</span>
+                <input type="text" class="settings-input" id="mcp-manual-name" placeholder="my-server" />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">Command</span>
+                <input type="text" class="settings-input" id="mcp-manual-command" placeholder="npx" />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">Args</span>
+                <input type="text" class="settings-input" id="mcp-manual-args" placeholder="-y @scope/pkg (space separated)" />
+              </div>
+              <div class="settings-row">
+                <span class="settings-label">Env</span>
+                <input type="text" class="settings-input" id="mcp-manual-env" placeholder="KEY=value,KEY2=val2" />
+              </div>
+              <button class="settings-key-save" id="mcp-manual-add" style="width:100%;margin-top:6px;">Add Server</button>
+            </div>
+          </details>
+
+          <!-- Server list -->
+          <div class="mcp-server-list" id="mcp-server-list">
+            <div class="mcp-empty-state">No MCP servers configured</div>
+          </div>
+        </div>
+
+        <!-- Skills Discovery Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:puzzle"></span>
+            <span>Skills</span>
+            <button class="settings-key-save" id="skills-scan-btn" style="margin-left:auto;padding:2px 10px;font-size:11px;">
+              <span class="iconify" data-icon="mdi:magnify-scan" style="margin-right:2px"></span> Scan
+            </button>
+          </div>
+
+          <!-- Directory input -->
+          <div class="settings-row">
+            <span class="settings-label">Directories</span>
+            <div class="settings-key-input-row">
+              <input type="text" class="settings-input" id="skills-dir-input" placeholder="~/.claude/skills" />
+              <button class="settings-key-save" id="skills-dir-add">Add</button>
+            </div>
+          </div>
+
+          <!-- Directory tags -->
+          <div class="skills-dir-list" id="skills-dir-list"></div>
+
+          <!-- Skills list -->
+          <div class="skills-list" id="skills-list">
+            <div class="mcp-empty-state">Click Scan to discover skills</div>
           </div>
         </div>
 
