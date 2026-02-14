@@ -32,10 +32,20 @@
         <div class="ring-3"></div>
       </div>
       <canvas id="live2d-canvas"></canvas>
+      <!-- Avatar carousel nav arrows -->
+      <button class="avatar-nav avatar-prev" id="avatar-prev" title="Previous character">
+        <span class="iconify" data-icon="mdi:chevron-left"></span>
+      </button>
+      <button class="avatar-nav avatar-next" id="avatar-next" title="Next character">
+        <span class="iconify" data-icon="mdi:chevron-right"></span>
+      </button>
+      <!-- Avatar name label -->
+      <div class="avatar-name-label" id="avatar-name-label">Octavia</div>
       <!-- Tap hint -->
       <div class="tap-hint" id="tap-hint">
         <span class="iconify tap-icon" data-icon="mdi:microphone"></span>
-        <span class="tap-text">Push to Talk</span>
+        <span class="tap-text">Hold avatar or</span>
+        <span class="tap-keycap" id="tap-keycap">Opt+Space</span>
       </div>
     </div>
 
@@ -57,11 +67,11 @@
           <span class="state-text" id="state-text">Type to start chatting</span>
         </div>
         <div class="widget-controls">
-          <button id="character-select-btn" class="tiny-btn" title="Switch character">
-            <span class="iconify" data-icon="mdi:account-switch"></span>
+          <button id="tts-settings-btn" class="tiny-btn" title="Voice settings">
+            <span class="iconify" data-icon="mdi:volume-high"></span>
           </button>
-          <button id="voice-select-btn" class="tiny-btn" title="Switch voice">
-            <span class="iconify" data-icon="mdi:music-note"></span>
+          <button id="global-settings-btn" class="tiny-btn" title="Global settings">
+            <span class="iconify" data-icon="mdi:cog"></span>
           </button>
           <button id="minimize-btn" class="tiny-btn" title="Minimize">
             <span class="iconify" data-icon="mdi:minus"></span>
@@ -81,31 +91,150 @@
       </div>
     </div>
 
-    <!-- Character select panel -->
-    <div class="character-panel" id="character-panel" style="display: none;">
-      <div class="character-panel-header">
-        <span class="character-panel-title">Choose Character</span>
-        <button id="close-character-panel" class="tiny-btn">
+    <!-- TTS Settings Panel (per-avatar voice) -->
+    <div class="settings-panel" id="tts-settings-panel" style="display: none;">
+      <div class="settings-panel-header">
+        <span class="settings-panel-title">
+          <span class="iconify" data-icon="mdi:volume-high" style="margin-right:4px"></span>
+          Voice
+          <span class="settings-avatar-tag" id="settings-avatar-tag"></span>
+        </span>
+        <button id="close-tts-settings" class="tiny-btn">
           <span class="iconify" data-icon="mdi:close"></span>
         </button>
       </div>
-      <div class="character-list" id="character-list"></div>
+      <div class="settings-body" id="tts-settings-body">
+        <div class="settings-section">
+          <div class="settings-row">
+            <span class="settings-label">Provider</span>
+            <div class="settings-pills" id="settings-tts-pills">
+              <button class="settings-pill active" data-provider="edge">Edge TTS</button>
+              <button class="settings-pill" data-provider="minimax">MiniMax</button>
+            </div>
+          </div>
+          <div class="settings-voice-list" id="settings-voice-list"></div>
+        </div>
+      </div>
+      <button class="settings-done-btn" id="tts-settings-done">
+        <span class="iconify" data-icon="mdi:check"></span> Done
+      </button>
     </div>
 
-    <!-- Voice select panel -->
-    <div class="voice-panel" id="voice-panel" style="display: none;">
-      <div class="voice-panel-header">
-        <span class="voice-panel-title">Choose Voice</span>
-        <button id="close-voice-panel" class="tiny-btn">
+    <!-- Global Settings Panel -->
+    <div class="settings-panel" id="global-settings-panel" style="display: none;">
+      <div class="settings-panel-header">
+        <span class="settings-panel-title">
+          <span class="iconify" data-icon="mdi:cog" style="margin-right:4px"></span>
+          Settings
+        </span>
+        <button id="close-global-settings" class="tiny-btn">
           <span class="iconify" data-icon="mdi:close"></span>
         </button>
       </div>
-      <div class="voice-filter">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="zh">Chinese</button>
-        <button class="filter-btn" data-filter="en">English</button>
+      <div class="settings-body" id="global-settings-body">
+
+        <!-- Speech Input Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:microphone"></span>
+            <span>Speech Input</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Provider</span>
+            <div class="settings-pills" id="settings-stt-pills">
+              <button class="settings-pill active" data-stt="deepgram">Deepgram</button>
+              <button class="settings-pill" data-stt="groq">Groq Whisper</button>
+            </div>
+          </div>
+          <div class="settings-groq-options" id="settings-groq-options" style="display: none;">
+            <div class="settings-row">
+              <span class="settings-label">Model</span>
+              <div class="settings-pills" id="settings-groq-model-pills">
+                <button class="settings-pill active" data-model="whisper-large-v3-turbo">v3-turbo</button>
+                <button class="settings-pill" data-model="whisper-large-v3">v3</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Push to Talk Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:keyboard"></span>
+            <span>Push to Talk</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Current</span>
+            <span class="settings-hotkey-badge" id="settings-hotkey-badge">Opt+Space</span>
+          </div>
+          <div class="settings-hotkey-capture" id="settings-hotkey-capture">
+            <span class="iconify" id="settings-capture-icon" data-icon="mdi:circle-outline"></span>
+            <span id="settings-capture-text">Tap to record new combo</span>
+          </div>
+          <div class="settings-preset-row">
+            <button class="settings-preset-btn" data-combo='{"alt":true,"code":"Space"}'><span class="preset-keycap">Opt+Space</span></button>
+            <button class="settings-preset-btn" data-combo='{"alt":true,"code":"KeyR"}'><span class="preset-keycap">Opt+R</span></button>
+            <button class="settings-preset-btn" data-combo='{"ctrl":true,"code":"Space"}'><span class="preset-keycap">Ctrl+Space</span></button>
+            <button class="settings-preset-btn" data-combo='{"code":"F5"}'><span class="preset-keycap">F5</span></button>
+          </div>
+        </div>
+
+        <!-- API Keys Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:key-variant"></span>
+            <span>API Keys</span>
+          </div>
+          <div class="settings-key-group">
+            <span class="settings-label">MiniMax</span>
+            <div class="settings-key-input-row">
+              <input type="password" class="settings-input" id="settings-minimax-key" placeholder="Enter API Key" />
+              <button class="settings-key-save" id="settings-minimax-save">Save</button>
+            </div>
+            <div class="settings-key-status" id="settings-minimax-status"></div>
+          </div>
+          <div class="settings-key-group">
+            <span class="settings-label">Groq</span>
+            <div class="settings-key-input-row">
+              <input type="password" class="settings-input" id="settings-groq-key" placeholder="Enter API Key" />
+              <button class="settings-key-save" id="settings-groq-save">Save</button>
+            </div>
+            <div class="settings-key-status" id="settings-groq-status"></div>
+          </div>
+        </div>
+
+        <!-- Connection Section -->
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <span class="iconify" data-icon="mdi:connection"></span>
+            <span>Connection</span>
+          </div>
+          <div class="settings-connection-list" id="settings-connection-list">
+            <div class="settings-connection-item active" data-connection="openclaw">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:robot-outline"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">OpenClaw</div>
+                <div class="connection-desc">Clawdbot AI assistant</div>
+              </div>
+              <span class="connection-status connected">
+                <span class="iconify" data-icon="mdi:check-circle"></span>
+              </span>
+            </div>
+            <div class="settings-connection-item disabled" data-connection="claude-code">
+              <span class="connection-icon"><span class="iconify" data-icon="mdi:console"></span></span>
+              <div class="connection-info">
+                <div class="connection-name">Claude Code</div>
+                <div class="connection-desc">Coming soon</div>
+              </div>
+              <span class="connection-badge">Soon</span>
+            </div>
+          </div>
+        </div>
+
       </div>
-      <div class="voice-list" id="voice-list"></div>
+      <button class="settings-done-btn" id="global-settings-done">
+        <span class="iconify" data-icon="mdi:check"></span> Done
+      </button>
     </div>
   </div>
 

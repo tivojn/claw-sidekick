@@ -16,6 +16,8 @@ let executeTimer = null;
 let accumulatedTranscript = '';
 let lastAIResponse = '';
 let countdownInterval = null;
+let groqAudioChunks = [];
+let useGroqSTT = false;
 
 // ===== Character Profiles =====
 const CHARACTER_PROFILES = {
@@ -191,6 +193,31 @@ const listeningPulseRing = document.getElementById('listening-pulse-ring');
 const foldToggle = document.getElementById('fold-toggle');
 const bottomPanel = document.getElementById('bottom-panel');
 
+// ===== Avatar visibility (hide during settings panels) =====
+function setAvatarVisible(visible) {
+  const live2dCanvas = document.getElementById('live2d-canvas');
+  const auraCanvas = document.getElementById('aura-canvas');
+  if (live2dCanvas) live2dCanvas.style.display = visible ? '' : 'none';
+  if (auraCanvas) auraCanvas.style.display = visible ? '' : 'none';
+}
+
+function isAnyPanelOpen() {
+  const ttsPanel = document.getElementById('tts-settings-panel');
+  const globalPanel = document.getElementById('global-settings-panel');
+  return (ttsPanel && ttsPanel.style.display !== 'none') ||
+         (globalPanel && globalPanel.style.display !== 'none');
+}
+
+function onPanelOpen() {
+  setAvatarVisible(false);
+}
+
+function onPanelClose() {
+  if (!isAnyPanelOpen()) {
+    setAvatarVisible(true);
+  }
+}
+
 // ===== 初始化光环动画 + Live2D =====
 document.addEventListener('DOMContentLoaded', async () => {
   const canvas = document.getElementById('aura-canvas');
@@ -213,6 +240,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initMiniMode();
   initStreamingTTS();  // 初始化流式 TTS 监听
   initFilePathClickHandler();  // 初始化文件路径点击处理
+  initPTTToggle();  // Listen for global PTT shortcut from main process
 
   // 首次启动播放欢迎动画
   if (isFirstLaunch) {
@@ -579,6 +607,36 @@ function initFilePathClickHandler() {
   });
 }
 
+// ===== PTT Toggle (from Electron globalShortcut) =====
+function initPTTToggle() {
+  if (!window.electronAPI || !window.electronAPI.ptt) return;
+  window.electronAPI.ptt.onToggle(() => {
+    console.log('[PTT] Global shortcut triggered, state:', appState);
+    if (appState === 'idle' || appState === 'followup') {
+      accumulatedTranscript = '';
+      setAppState('listening');
+      startRecording();
+    } else if (appState === 'listening') {
+      stopRecording().then((transcript) => {
+        if (transcript) {
+          showBubble('🎤 ' + escapeHtml(transcript), true);
+          handleCommand(transcript);
+        } else if (accumulatedTranscript.trim()) {
+          const cmd = accumulatedTranscript;
+          accumulatedTranscript = '';
+          handleCommand(cmd);
+        } else {
+          setAppState('idle');
+        }
+      });
+    } else if (appState === 'speaking') {
+      interruptTTS();
+      isProcessing = false;
+      setAppState('idle');
+    }
+  });
+}
+
 // ===== Deepgram 事件监听 =====
 function initDeepgramListeners() {
   window.electronAPI.deepgram.removeAllListeners();
@@ -672,6 +730,7 @@ function initDeepgramListeners() {
 let audioQueue = [];
 let isPlayingQueue = false;
 let streamingTextBuffer = '';
+let streamingChunksReceived = 0; // track if streaming TTS sent any chunks
 
 function interruptTTS() {
   // 停止当前播放
@@ -700,6 +759,7 @@ function initStreamingTTS() {
   // 监听音频块
   window.electronAPI.deepgram.onAudioChunk(async (data) => {
     console.log(`[TTS] 收到音频块 #${data.sentenceId}`);
+    streamingChunksReceived++;
 
     audioQueue.push(data);
 
@@ -735,11 +795,14 @@ async function processAudioQueue() {
   isPlayingQueue = false;
   isSpeaking = false;
 
-  // TTS 播放完毕，回到 idle（text-only mode, no voice followup）
-  if (appState === 'speaking') {
+  // TTS 播放完毕，回到 idle
+  // Always reset isProcessing when streaming finishes to prevent stuck state
+  if (appState === 'speaking' || isProcessing) {
     isProcessing = false;
-    setAppState('idle');
-    textInput.focus();
+    if (appState === 'speaking') {
+      setAppState('idle');
+      textInput.focus();
+    }
   }
 }
 
@@ -786,12 +849,44 @@ function playAudioChunk(audioBase64, text) {
   });
 }
 
+// ===== PCM to WAV conversion (for Groq batch STT) =====
+function pcmToWavBase64(pcmData, sampleRate) {
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const dataSize = pcmData.length;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (off, str) => { for (let i = 0; i < str.length; i++) view.setUint8(off + i, str.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+  new Uint8Array(buffer, 44).set(pcmData);
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
 // ===== 录音控制 =====
 async function startRecording() {
   if (isRecording || isProcessing) return;
 
   try {
     interruptTTS();
+
+    useGroqSTT = settingsState.sttProvider === 'groq';
 
     audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -802,13 +897,20 @@ async function startRecording() {
       }
     });
 
-    const result = await window.electronAPI.deepgram.startListening();
-    if (!result.success) {
-      showBubble('Speech recognition failed to start');
-      setAppState('idle');
-      audioStream.getTracks().forEach(track => track.stop());
-      audioStream = null;
-      return;
+    if (useGroqSTT) {
+      // Groq batch mode: collect audio locally
+      groqAudioChunks = [];
+      console.log('[STT] Using Groq Whisper (batch mode)');
+    } else {
+      // Deepgram streaming mode
+      const result = await window.electronAPI.deepgram.startListening();
+      if (!result.success) {
+        showBubble('Speech recognition failed to start');
+        setAppState('idle');
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStream = null;
+        return;
+      }
     }
 
     audioContext = new (window.AudioContext || window.webkitAudioContext)({
@@ -821,8 +923,11 @@ async function startRecording() {
 
     audioWorkletNode.port.onmessage = (event) => {
       if (isRecording && event.data) {
-        const uint8 = new Uint8Array(event.data);
-        window.electronAPI.deepgram.sendAudio(uint8);
+        if (useGroqSTT) {
+          groqAudioChunks.push(new Uint8Array(event.data));
+        } else {
+          window.electronAPI.deepgram.sendAudio(new Uint8Array(event.data));
+        }
       }
     };
 
@@ -842,9 +947,11 @@ async function startRecording() {
   }
 }
 
+// Returns transcript string for Groq mode, null for Deepgram (events handle it)
 async function stopRecording() {
-  if (!isRecording) return;
+  if (!isRecording) return null;
 
+  const wasGroq = useGroqSTT;
   isRecording = false;
 
   // 清除执行定时器和倒计时
@@ -868,7 +975,36 @@ async function stopRecording() {
     audioStream = null;
   }
 
-  await window.electronAPI.deepgram.stopListening();
+  if (wasGroq && groqAudioChunks.length > 0) {
+    // Concatenate PCM chunks → WAV → send to Groq
+    const totalLen = groqAudioChunks.reduce((s, c) => s + c.length, 0);
+    const pcm = new Uint8Array(totalLen);
+    let off = 0;
+    for (const chunk of groqAudioChunks) { pcm.set(chunk, off); off += chunk.length; }
+    groqAudioChunks = [];
+
+    showBubble('Transcribing...');
+    try {
+      const wavBase64 = pcmToWavBase64(pcm, 16000);
+      const result = await window.electronAPI.stt.transcribeGroq(wavBase64);
+      if (result.success && result.text && result.text.trim()) {
+        console.log('[STT] Groq transcript:', result.text.trim());
+        return result.text.trim();
+      } else {
+        showBubble('Could not understand, try again');
+        setAppState('idle');
+        return null;
+      }
+    } catch (e) {
+      console.error('[STT] Groq transcription failed:', e);
+      showBubble('Transcription failed');
+      setAppState('idle');
+      return null;
+    }
+  } else {
+    await window.electronAPI.deepgram.stopListening();
+    return null; // Deepgram handles transcript via events
+  }
 }
 
 // ===== 点击角色区域 → 聚焦文本输入 (voice disabled, text-only mode) =====
@@ -978,7 +1114,8 @@ async function handleSyncTask(command, isGoodbye) {
   streamingTextBuffer = '';
   audioQueue = [];
   isPlayingQueue = false;
-  isSpeaking = true;  // 标记正在播放
+  isSpeaking = true;
+  streamingChunksReceived = 0;
 
   try {
     const result = await window.electronAPI.executeCommand(command);
@@ -989,40 +1126,32 @@ async function handleSyncTask(command, isGoodbye) {
     // 缓存 AI 回复（用于打断后查看）
     lastAIResponse = cleanedMessage;
 
-    // 流式 TTS 已经在后台播放（由 initStreamingTTS 监听事件驱动）
-    // 如果没有收到音频块（例如 Clawdbot 返回空），使用传统 TTS 作为备选
-    if (audioQueue.length === 0 && !isPlayingQueue) {
-      // 没有收到流式音频，使用传统 TTS
+    // Only use non-streaming fallback if NO streaming chunks were received at all
+    // (streamingChunksReceived tracks this to avoid race conditions with slow TTS providers)
+    if (streamingChunksReceived === 0 && audioQueue.length === 0 && !isPlayingQueue) {
+      // No streaming audio received — use traditional TTS
       setAppState('speaking');
       showBubbleWithViewBtn(cleanedMessage);
       await playTextToSpeech(cleanedMessage);
 
-      // TTS 播放完后，再显示文字
       showBubbleWithTyping(escapeHtml(cleanedMessage));
 
-      // 如果是告别语，播放告别动画
       if (isGoodbye) {
         setAppState('goodbye');
         isProcessing = false;
-        setTimeout(() => {
-          setAppState('idle');
-        }, 3000);
+        setTimeout(() => { setAppState('idle'); }, 3000);
       } else {
-        // 回到 idle（text-only mode）
         isProcessing = false;
         setAppState('idle');
         textInput.focus();
       }
-    }
-    // 如果是告别语，特殊处理
-    if (isGoodbye) {
+    } else if (isGoodbye) {
+      // Streaming was used but it's a goodbye
       setAppState('goodbye');
       isProcessing = false;
-      setTimeout(() => {
-        setAppState('idle');
-      }, 3000);
+      setTimeout(() => { setAppState('idle'); }, 3000);
     }
-    // 否则流式 TTS 会在 processAudioQueue 中自动进入 followup 模式
+    // Otherwise: streaming TTS handles state transition in processAudioQueue
 
   } catch (error) {
     console.error('[App] 处理失败:', error);
@@ -1101,10 +1230,6 @@ async function playTextToSpeech(text) {
 }
 
 // ===== 音色选择 =====
-const voicePanel = document.getElementById('voice-panel');
-const voiceList = document.getElementById('voice-list');
-const voiceSelectBtn = document.getElementById('voice-select-btn');
-const closeVoicePanel = document.getElementById('close-voice-panel');
 
 // Edge-TTS 音色列表（中文 + 英文）
 const VOICE_OPTIONS = [
@@ -1158,165 +1283,55 @@ const VOICE_OPTIONS = [
 ];
 
 let currentSelectedVoice = 'en-US-EmmaMultilingualNeural';
-let currentFilter = 'all'; // all | zh | en
 let previewingVoice = null;
 
-function renderVoiceList() {
-  voiceList.innerHTML = '';
+// Voice rendering is now handled by the unified settings panel (see below)
 
-  VOICE_OPTIONS.forEach(group => {
-    // 筛选：all 显示全部，zh 显示中文和推荐，en 显示英文和推荐
-    if (currentFilter !== 'all' && group.lang !== 'all' && group.lang !== currentFilter) {
-      return;
-    }
-
-    const groupLabel = document.createElement('div');
-    groupLabel.className = 'voice-group-label';
-    groupLabel.textContent = group.group;
-    voiceList.appendChild(groupLabel);
-
-    group.voices.forEach(voice => {
-      const item = document.createElement('div');
-      item.className = 'voice-item' + (voice.id === currentSelectedVoice ? ' active' : '');
-      item.innerHTML = `
-        <span class="voice-icon"><span class="iconify" data-icon="${voice.icon}"></span></span>
-        <div class="voice-info">
-          <div class="voice-name">${voice.name}</div>
-          <div class="voice-desc">${voice.desc}</div>
-        </div>
-        <button class="voice-preview-btn" data-voice="${voice.id}" title="Preview">
-          <span class="iconify" data-icon="mdi:play"></span>
-        </button>
-        ${voice.id === currentSelectedVoice ? '<span class="voice-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
-      `;
-
-      // 点击选择音色
-      item.addEventListener('click', (e) => {
-        if (!e.target.closest('.voice-preview-btn')) {
-          selectVoice(voice.id);
-        }
-      });
-
-      // 试听按钮
-      const previewBtn = item.querySelector('.voice-preview-btn');
-      previewBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        previewVoice(voice.id, voice.name);
-      });
-
-      voiceList.appendChild(item);
-    });
-  });
-}
-
-function setFilter(filter) {
-  currentFilter = filter;
-  // 更新筛选按钮状态
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filter);
-  });
-  renderVoiceList();
-}
-
-async function previewVoice(voiceId, voiceName) {
-  if (previewingVoice === voiceId) return;
-
-  previewingVoice = voiceId;
-  const previewText = voiceId.startsWith('zh-') ? '你好，很高兴认识你！' : 'Hello! Nice to meet you.';
-
-  try {
-    // 临时设置音色
-    await window.electronAPI.tts.setVoice(voiceId);
-    const result = await window.electronAPI.deepgram.textToSpeech(previewText);
-
-    if (result.success) {
-      const audio = new Audio('data:audio/mp3;base64,' + result.audio);
-      audio.onended = () => { previewingVoice = null; };
-      audio.onerror = () => { previewingVoice = null; };
-      await audio.play();
-    }
-
-    // 恢复原音色
-    await window.electronAPI.tts.setVoice(currentSelectedVoice);
-  } catch (e) {
-    console.error('[App] 试听失败:', e);
-    previewingVoice = null;
-    await window.electronAPI.tts.setVoice(currentSelectedVoice);
-  }
-}
-
-async function selectVoice(voiceId) {
-  currentSelectedVoice = voiceId;
-  await window.electronAPI.tts.setVoice(voiceId);
-  renderVoiceList();
-  // 找到音色名字显示提示
-  let voiceName = voiceId;
-  for (const g of VOICE_OPTIONS) {
-    const v = g.voices.find(v => v.id === voiceId);
-    if (v) { voiceName = v.name; break; }
-  }
-  showBubble(`Voice switched to ${escapeHtml(voiceName)}`);
-  setTimeout(() => {
-    voicePanel.style.display = 'none';
-  }, 600);
-}
-
-function openVoicePanel() {
-  currentFilter = 'all';
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === 'all');
-  });
-  renderVoiceList();
-  voicePanel.style.display = 'flex';
-
-  // 绑定筛选按钮事件
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.onclick = () => setFilter(btn.dataset.filter);
-  });
-}
-
-// 初始化时获取当前音色
+// 初始化时获取当前音色 + sync per-avatar TTS
 async function initVoice() {
   try {
-    const result = await window.electronAPI.tts.getVoice();
-    if (result.voiceId) currentSelectedVoice = result.voiceId;
-  } catch (e) {}
+    // Switch to current avatar's TTS config
+    const avatarCfg = await window.electronAPI.tts.switchAvatar(currentCharacter.id);
+    if (avatarCfg.success) {
+      currentSelectedVoice = avatarCfg.edgeVoice || currentCharacter.defaultVoice;
+      settingsState.currentProvider = avatarCfg.provider || 'edge';
+      settingsState.currentMinimaxVoice = avatarCfg.minimaxVoice || '';
+    } else {
+      const result = await window.electronAPI.tts.getVoice();
+      if (result.voiceId) currentSelectedVoice = result.voiceId;
+    }
+  } catch (e) {
+    try {
+      const result = await window.electronAPI.tts.getVoice();
+      if (result.voiceId) currentSelectedVoice = result.voiceId;
+    } catch (_) {}
+  }
 }
 
-// ===== 角色切换 =====
-const characterPanel = document.getElementById('character-panel');
-const characterList = document.getElementById('character-list');
-const characterSelectBtn = document.getElementById('character-select-btn');
-const closeCharacterPanel = document.getElementById('close-character-panel');
+// ===== Avatar Carousel =====
+const characterKeys = Object.keys(CHARACTER_PROFILES);
+const avatarNameLabel = document.getElementById('avatar-name-label');
 
-function renderCharacterList() {
-  characterList.innerHTML = '';
+function updateAvatarNameLabel() {
+  if (avatarNameLabel) avatarNameLabel.textContent = currentCharacter.name;
+}
 
-  Object.values(CHARACTER_PROFILES).forEach(char => {
-    const item = document.createElement('div');
-    item.className = 'character-item' + (char.id === currentCharacter.id ? ' active' : '');
+function carouselPrev() {
+  const idx = characterKeys.indexOf(currentCharacter.id);
+  const prevIdx = (idx - 1 + characterKeys.length) % characterKeys.length;
+  const prevChar = CHARACTER_PROFILES[characterKeys[prevIdx]];
+  if (prevChar && prevChar.model) {
+    switchCharacter(prevChar.id);
+  }
+}
 
-    const isAvailable = !!char.model; // Available if has a Live2D model
-
-    item.innerHTML = `
-      <span class="character-icon"><span class="iconify" data-icon="${char.icon}"></span></span>
-      <div class="character-info">
-        <div class="character-name">${char.name}${!isAvailable ? ' <span class="coming-soon">No model</span>' : ''}</div>
-        <div class="character-desc">${char.desc}</div>
-      </div>
-      ${char.id === currentCharacter.id ? '<span class="character-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
-    `;
-
-    if (isAvailable) {
-      item.addEventListener('click', () => {
-        switchCharacter(char.id);
-      });
-    } else {
-      item.classList.add('disabled');
-    }
-
-    characterList.appendChild(item);
-  });
+function carouselNext() {
+  const idx = characterKeys.indexOf(currentCharacter.id);
+  const nextIdx = (idx + 1) % characterKeys.length;
+  const nextChar = CHARACTER_PROFILES[characterKeys[nextIdx]];
+  if (nextChar && nextChar.model) {
+    switchCharacter(nextChar.id);
+  }
 }
 
 async function switchCharacter(characterId) {
@@ -1339,14 +1354,22 @@ async function switchCharacter(characterId) {
     await live2dRenderer.loadModel(newChar.model);
   }
 
-  // 切换默认音色
-  currentSelectedVoice = newChar.defaultVoice;
+  // Switch avatar TTS config (per-avatar routing)
   try {
-    await window.electronAPI.tts.setVoice(newChar.defaultVoice);
-  } catch (e) {}
+    const avatarCfg = await window.electronAPI.tts.switchAvatar(characterId);
+    if (avatarCfg.success) {
+      currentSelectedVoice = avatarCfg.edgeVoice || newChar.defaultVoice;
+      settingsState.currentProvider = avatarCfg.provider || 'edge';
+      settingsState.currentMinimaxVoice = avatarCfg.minimaxVoice || '';
+    }
+  } catch (e) {
+    // Fallback to character default
+    currentSelectedVoice = newChar.defaultVoice;
+    try { await window.electronAPI.tts.setVoice(newChar.defaultVoice); } catch (_) {}
+  }
 
-  // 关闭面板
-  characterPanel.style.display = 'none';
+  // Update carousel label
+  updateAvatarNameLabel();
 
   // 显示切换提示
   showBubble(`Switched to ${escapeHtml(newChar.name)}`);
@@ -1354,15 +1377,6 @@ async function switchCharacter(characterId) {
   // 重新播放欢迎动画
   isFirstLaunch = true;
   playWelcomeVideo();
-
-  // 刷新角色列表和音色列表
-  renderCharacterList();
-  renderVoiceList();
-}
-
-function openCharacterPanel() {
-  renderCharacterList();
-  characterPanel.style.display = 'flex';
 }
 
 // ===== 悬浮球模式 =====
@@ -1433,12 +1447,20 @@ async function onMiniOrbTap() {
   if (isProcessing) return;
 
   if (appState === 'listening' || appState === 'followup') {
-    // 正在聆听 → 停止
     clearTimeout(executeTimer);
+    const transcript = await stopRecording();
+    if (transcript) {
+      showBubble('🎤 ' + escapeHtml(transcript), true);
+      handleCommand(transcript);
+    } else if (accumulatedTranscript.trim()) {
+      const cmd = accumulatedTranscript;
+      accumulatedTranscript = '';
+      handleCommand(cmd);
+    } else {
+      setMiniOrbState('idle');
+      setAppState('idle');
+    }
     accumulatedTranscript = '';
-    await stopRecording();
-    setMiniOrbState('idle');
-    setAppState('idle');
     return;
   }
 
@@ -1538,26 +1560,725 @@ function exitMiniMode() {
 }
 
 // ===== 事件监听 =====
-lobsterArea.addEventListener('click', onLobsterClick);
+// Avatar tap (quick) = interrupt/focus; hold (300ms+) = push-to-talk
+let avatarPressTimer = null;
+let avatarIsHolding = false;
 
-voiceSelectBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  openVoicePanel();
+lobsterArea.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.avatar-nav') || e.target.closest('.tap-hint')) return;
+  avatarIsHolding = false;
+  avatarPressTimer = setTimeout(() => {
+    avatarIsHolding = true;
+    if (appState === 'idle' || appState === 'followup') {
+      accumulatedTranscript = '';
+      setAppState('listening');
+      startRecording();
+    }
+  }, 300);
 });
 
-characterSelectBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  openCharacterPanel();
+lobsterArea.addEventListener('mouseup', async (e) => {
+  if (e.target.closest('.avatar-nav') || e.target.closest('.tap-hint')) return;
+  clearTimeout(avatarPressTimer);
+  if (avatarIsHolding && isRecording) {
+    avatarIsHolding = false;
+    const transcript = await stopRecording();
+    if (transcript) {
+      showBubble('🎤 ' + escapeHtml(transcript), true);
+      handleCommand(transcript);
+    } else if (!useGroqSTT && accumulatedTranscript.trim()) {
+      const cmd = accumulatedTranscript;
+      accumulatedTranscript = '';
+      handleCommand(cmd);
+    } else if (appState === 'listening') {
+      setAppState('idle');
+    }
+  } else if (!avatarIsHolding) {
+    onLobsterClick();
+  }
+  avatarIsHolding = false;
 });
 
-closeCharacterPanel.addEventListener('click', (e) => {
-  e.stopPropagation();
-  characterPanel.style.display = 'none';
+lobsterArea.addEventListener('mouseleave', () => {
+  clearTimeout(avatarPressTimer);
+  if (avatarIsHolding && isRecording) {
+    avatarIsHolding = false;
+    accumulatedTranscript = '';
+    stopRecording();
+    setAppState('idle');
+  }
 });
 
-closeVoicePanel.addEventListener('click', (e) => {
+// Avatar carousel buttons
+document.getElementById('avatar-prev').addEventListener('click', (e) => {
   e.stopPropagation();
-  voicePanel.style.display = 'none';
+  carouselPrev();
+});
+document.getElementById('avatar-next').addEventListener('click', (e) => {
+  e.stopPropagation();
+  carouselNext();
+});
+
+// ===== Hotkey settings =====
+const tapKeycap = document.getElementById('tap-keycap');
+
+// Default combo: Option+Space (fn is not detectable via JS)
+const DEFAULT_COMBO = { ctrl: false, alt: true, shift: false, meta: false, code: 'Space' };
+
+// e.code → display label (physical key names)
+const CODE_LABEL = {
+  'fn': 'fn',
+  'Backquote': '`', 'Minus': '-', 'Equal': '=',
+  'BracketLeft': '[', 'BracketRight': ']', 'Backslash': '\\',
+  'Semicolon': ';', 'Quote': "'", 'Comma': ',', 'Period': '.', 'Slash': '/',
+  'Space': 'Space', 'Tab': 'Tab', 'Enter': '↵',
+  'Backspace': '⌫', 'Escape': 'Esc', 'CapsLock': 'Caps',
+  'ArrowUp': '↑', 'ArrowDown': '↓', 'ArrowLeft': '←', 'ArrowRight': '→',
+};
+
+// Modifier keys (skip as main key during recording)
+const MODIFIER_CODES = new Set([
+  'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+  'ShiftLeft', 'ShiftRight', 'MetaLeft', 'MetaRight',
+]);
+
+let pttCombo = DEFAULT_COMBO;
+let isCapturingHotkey = false;
+
+// Load saved combo
+try {
+  const saved = localStorage.getItem('pttCombo');
+  if (saved) pttCombo = JSON.parse(saved);
+} catch (e) {}
+
+function codeToLabel(code) {
+  if (CODE_LABEL[code]) return CODE_LABEL[code];
+  // KeyA → A, KeyZ → Z
+  if (code.startsWith('Key')) return code.slice(3);
+  // Digit1 → 1
+  if (code.startsWith('Digit')) return code.slice(5);
+  // F1, F2, etc.
+  if (/^F\d+$/.test(code)) return code;
+  // Numpad
+  if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
+  return code;
+}
+
+function comboToLabel(combo) {
+  const c = combo.code || combo.key || 'fn'; // backward compat
+  if (c === 'fn') return 'fn';
+  const parts = [];
+  if (combo.ctrl) parts.push('Ctrl');
+  if (combo.alt) parts.push('Opt');
+  if (combo.shift) parts.push('Shift');
+  if (combo.meta) parts.push('Cmd');
+  parts.push(codeToLabel(c));
+  return parts.join(' + ');
+}
+
+function comboToShortLabel(combo) {
+  const c = combo.code || combo.key || 'fn';
+  if (c === 'fn') return 'fn';
+  const parts = [];
+  if (combo.ctrl) parts.push('Ctrl');
+  if (combo.alt) parts.push('Opt');
+  if (combo.shift) parts.push('Shift');
+  if (combo.meta) parts.push('Cmd');
+  parts.push(codeToLabel(c));
+  return parts.join('+');
+}
+
+function comboCode(combo) {
+  return combo.code || combo.key || 'fn';
+}
+
+function updateHotkeyUI() {
+  // Update tap hint keycap
+  tapKeycap.textContent = comboToShortLabel(pttCombo);
+
+  // Update settings panel hotkey badge if open
+  const badge = document.getElementById('settings-hotkey-badge');
+  if (badge) badge.textContent = comboToLabel(pttCombo);
+
+  // Update preset active state
+  document.querySelectorAll('.settings-preset-btn').forEach(btn => {
+    try {
+      const preset = JSON.parse(btn.dataset.combo);
+      const pCode = preset.code || preset.key || 'fn';
+      const curCode = comboCode(pttCombo);
+      const match = (!!preset.ctrl === !!pttCombo.ctrl) &&
+                    (!!preset.alt === !!pttCombo.alt) &&
+                    (!!preset.shift === !!pttCombo.shift) &&
+                    (!!preset.meta === !!pttCombo.meta) &&
+                    (pCode === curCode);
+      btn.classList.toggle('active', match);
+    } catch (e) {}
+  });
+}
+
+function setPttCombo(combo) {
+  pttCombo = combo;
+  localStorage.setItem('pttCombo', JSON.stringify(combo));
+  updateHotkeyUI();
+  console.log('[Hotkey] PTT combo set to:', comboToLabel(combo));
+  // Sync to main process for global shortcut
+  if (window.electronAPI && window.electronAPI.ptt) {
+    window.electronAPI.ptt.setShortcut(combo);
+  }
+}
+
+function stopCapturing() {
+  isCapturingHotkey = false;
+  const capture = document.getElementById('settings-hotkey-capture');
+  const captureText = document.getElementById('settings-capture-text');
+  const captureIcon = document.getElementById('settings-capture-icon');
+  if (capture) capture.classList.remove('listening');
+  if (captureText) captureText.textContent = 'Tap to record new combo';
+  if (captureIcon) captureIcon.setAttribute('data-icon', 'mdi:circle-outline');
+}
+
+// Global keydown handler for capture and PTT
+document.addEventListener('keydown', (e) => {
+  const anyPanelOpen = isAnyPanelOpen();
+
+  // --- Capture mode: record key combo ---
+  if (isCapturingHotkey && anyPanelOpen) {
+    if (MODIFIER_CODES.has(e.code)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const combo = {
+      ctrl: e.ctrlKey,
+      alt: e.altKey,
+      shift: e.shiftKey,
+      meta: e.metaKey,
+      code: e.code,
+    };
+
+    setPttCombo(combo);
+    stopCapturing();
+    const captureText = document.getElementById('settings-capture-text');
+    if (captureText) captureText.textContent = `Set: ${comboToLabel(combo)}`;
+    return;
+  }
+
+  // --- Push-to-talk trigger ---
+  if (anyPanelOpen) return;
+  if (e.repeat) return;
+  if (document.activeElement === textInput) return;
+
+  const cc = comboCode(pttCombo);
+  if (cc === 'fn') return; // fn can't be detected via JS
+
+  const codeMatch = e.code === cc;
+  const modMatch = (!!e.ctrlKey === !!pttCombo.ctrl) &&
+                   (!!e.altKey === !!pttCombo.alt) &&
+                   (!!e.shiftKey === !!pttCombo.shift) &&
+                   (!!e.metaKey === !!pttCombo.meta);
+
+  if (codeMatch && modMatch) {
+    e.preventDefault();
+    if (appState === 'idle' || appState === 'followup') {
+      accumulatedTranscript = '';
+      setAppState('listening');
+      startRecording();
+    } else if (appState === 'listening') {
+      stopRecording().then((transcript) => {
+        if (transcript) {
+          showBubble('🎤 ' + escapeHtml(transcript), true);
+          handleCommand(transcript);
+        } else if (accumulatedTranscript.trim()) {
+          const cmd = accumulatedTranscript;
+          accumulatedTranscript = '';
+          handleCommand(cmd);
+        } else {
+          setAppState('idle');
+        }
+      });
+    } else if (appState === 'speaking') {
+      interruptTTS();
+      isProcessing = false;
+      setAppState('idle');
+    }
+  }
+
+  if (e.code === 'Escape' && appState === 'listening') {
+    e.preventDefault();
+    accumulatedTranscript = '';
+    groqAudioChunks = [];
+    stopRecording().then(() => {
+      setAppState('idle');
+      showBubble('Recording cancelled');
+    });
+  }
+});
+
+// Initialize hotkey display
+updateHotkeyUI();
+
+// ===== Unified Settings Panel =====
+const settingsState = {
+  currentProvider: 'edge',
+  minimaxVoices: [],
+  currentMinimaxVoice: '',
+  sttProvider: 'deepgram',
+  groqModel: 'whisper-large-v3-turbo',
+  previewAudio: null,
+};
+
+// Open TTS settings panel (per-avatar voice)
+async function openTTSSettingsPanel() {
+  const panel = document.getElementById('tts-settings-panel');
+  if (!panel) return;
+
+  // Close other panels first
+  closeGlobalSettingsPanel();
+
+  // Load avatar's TTS config
+  try {
+    const avatarCfg = await window.electronAPI.tts.getAvatarConfig(currentCharacter.id);
+    if (avatarCfg) {
+      settingsState.currentProvider = avatarCfg.ttsProvider || 'edge';
+      currentSelectedVoice = avatarCfg.edgeVoice || currentCharacter.defaultVoice;
+      settingsState.currentMinimaxVoice = avatarCfg.minimaxVoice || '';
+    }
+  } catch (e) {}
+
+  // Update avatar tag
+  const avatarTag = document.getElementById('settings-avatar-tag');
+  if (avatarTag) avatarTag.textContent = currentCharacter.name;
+
+  // Update TTS provider pills
+  updateSettingsPills('settings-tts-pills', 'provider', settingsState.currentProvider);
+
+  // Render voice list for current provider
+  renderSettingsVoiceList();
+
+  panel.style.display = 'flex';
+  onPanelOpen();
+}
+
+function closeTTSSettingsPanel() {
+  const panel = document.getElementById('tts-settings-panel');
+  if (panel) panel.style.display = 'none';
+  // Stop any preview audio
+  if (settingsState.previewAudio) {
+    settingsState.previewAudio.pause();
+    settingsState.previewAudio = null;
+    previewingVoice = null;
+  }
+  onPanelClose();
+}
+
+// Open Global settings panel
+async function openGlobalSettingsPanel() {
+  const panel = document.getElementById('global-settings-panel');
+  if (!panel) return;
+
+  // Close other panels first
+  closeTTSSettingsPanel();
+
+  // Load STT config
+  try {
+    const stt = await window.electronAPI.stt.getProvider();
+    settingsState.sttProvider = stt.provider || 'deepgram';
+    settingsState.groqModel = stt.groqModel || 'whisper-large-v3-turbo';
+  } catch (e) {}
+
+  // Update STT provider pills
+  updateSettingsPills('settings-stt-pills', 'stt', settingsState.sttProvider);
+  const groqOpts = document.getElementById('settings-groq-options');
+  if (groqOpts) groqOpts.style.display = settingsState.sttProvider === 'groq' ? '' : 'none';
+  updateSettingsPills('settings-groq-model-pills', 'model', settingsState.groqModel);
+
+  // Load API key statuses
+  loadKeyStatuses();
+
+  // Update hotkey
+  updateHotkeyUI();
+
+  panel.style.display = 'flex';
+  onPanelOpen();
+}
+
+function closeGlobalSettingsPanel() {
+  const panel = document.getElementById('global-settings-panel');
+  if (panel) panel.style.display = 'none';
+  stopCapturing();
+  onPanelClose();
+}
+
+function updateSettingsPills(containerId, dataAttr, activeValue) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.querySelectorAll('.settings-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset[dataAttr] === activeValue);
+  });
+}
+
+// Render voice list based on current provider
+function renderSettingsVoiceList() {
+  const list = document.getElementById('settings-voice-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (settingsState.currentProvider === 'edge') {
+    renderEdgeVoices(list);
+  } else if (settingsState.currentProvider === 'minimax') {
+    renderMinimaxVoicesInSettings(list);
+  }
+}
+
+function renderEdgeVoices(container) {
+  VOICE_OPTIONS.forEach(group => {
+    const label = document.createElement('div');
+    label.className = 'settings-voice-group';
+    label.textContent = group.group;
+    container.appendChild(label);
+
+    group.voices.forEach(voice => {
+      const item = document.createElement('div');
+      item.className = 'settings-voice-item' + (voice.id === currentSelectedVoice ? ' active' : '');
+      item.innerHTML = `
+        <span class="voice-icon"><span class="iconify" data-icon="${voice.icon}"></span></span>
+        <div class="voice-info">
+          <div class="voice-name">${voice.name}</div>
+          <div class="voice-desc">${voice.desc}</div>
+        </div>
+        <button class="voice-preview-btn" title="Preview">
+          <span class="iconify" data-icon="mdi:play"></span>
+        </button>
+        ${voice.id === currentSelectedVoice ? '<span class="voice-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
+      `;
+
+      item.addEventListener('click', async (e) => {
+        if (e.target.closest('.voice-preview-btn')) return;
+        currentSelectedVoice = voice.id;
+        await window.electronAPI.tts.setVoice(voice.id);
+        await window.electronAPI.tts.setAvatarConfig(currentCharacter.id, { edgeVoice: voice.id });
+        renderSettingsVoiceList();
+      });
+
+      item.querySelector('.voice-preview-btn').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await previewEdgeVoice(voice.id, e.currentTarget);
+      });
+
+      container.appendChild(item);
+    });
+  });
+}
+
+async function previewEdgeVoice(voiceId, btn) {
+  if (previewingVoice === voiceId) return;
+  previewingVoice = voiceId;
+  if (btn) btn.classList.add('playing');
+
+  const previewText = voiceId.startsWith('zh-') ? '你好，很高兴认识你！' : 'Hello! Nice to meet you.';
+  try {
+    await window.electronAPI.tts.setVoice(voiceId);
+    const result = await window.electronAPI.deepgram.textToSpeech(previewText);
+    if (result.success) {
+      if (settingsState.previewAudio) settingsState.previewAudio.pause();
+      const audio = new Audio('data:audio/mp3;base64,' + result.audio);
+      settingsState.previewAudio = audio;
+      audio.onended = () => { previewingVoice = null; if (btn) btn.classList.remove('playing'); };
+      audio.onerror = () => { previewingVoice = null; if (btn) btn.classList.remove('playing'); };
+      await audio.play();
+    }
+    await window.electronAPI.tts.setVoice(currentSelectedVoice);
+  } catch (e) {
+    previewingVoice = null;
+    if (btn) btn.classList.remove('playing');
+    await window.electronAPI.tts.setVoice(currentSelectedVoice);
+  }
+}
+
+function renderMinimaxVoicesInSettings(container) {
+  if (settingsState.minimaxVoices.length === 0) {
+    container.innerHTML = '<div style="font-size:11px;color:rgba(255,255,255,0.4);padding:8px;">Add your MiniMax API key below to see available voices.</div>';
+    // Try loading voices
+    loadMinimaxVoicesForSettings();
+    return;
+  }
+
+  settingsState.minimaxVoices.forEach(voice => {
+    const item = document.createElement('div');
+    item.className = 'settings-voice-item' + (voice.id === settingsState.currentMinimaxVoice ? ' active' : '');
+    item.innerHTML = `
+      <span class="voice-icon"><span class="iconify" data-icon="mdi:account-voice"></span></span>
+      <div class="voice-info">
+        <div class="voice-name">${escapeHtml(voice.name)}</div>
+        <div class="voice-desc">${escapeHtml(voice.desc || voice.id)}</div>
+      </div>
+      <button class="voice-preview-btn" title="Preview">
+        <span class="iconify" data-icon="mdi:play"></span>
+      </button>
+      ${voice.id === settingsState.currentMinimaxVoice ? '<span class="voice-check"><span class="iconify" data-icon="mdi:check"></span></span>' : ''}
+    `;
+
+    item.addEventListener('click', async (e) => {
+      if (e.target.closest('.voice-preview-btn')) return;
+      settingsState.currentMinimaxVoice = voice.id;
+      await window.electronAPI.tts.setMinimaxVoice(voice.id);
+      await window.electronAPI.tts.setAvatarConfig(currentCharacter.id, { minimaxVoice: voice.id });
+      renderSettingsVoiceList();
+    });
+
+    item.querySelector('.voice-preview-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await previewMinimaxVoice(voice.id, e.currentTarget);
+    });
+
+    container.appendChild(item);
+  });
+}
+
+async function previewMinimaxVoice(voiceId, btn) {
+  if (previewingVoice === voiceId) return;
+  previewingVoice = voiceId;
+  if (btn) btn.classList.add('playing');
+
+  try {
+    const result = await window.electronAPI.tts.previewMinimax(voiceId);
+    if (result.success) {
+      if (settingsState.previewAudio) settingsState.previewAudio.pause();
+      const audio = new Audio('data:audio/mp3;base64,' + result.audio);
+      settingsState.previewAudio = audio;
+      audio.onended = () => { previewingVoice = null; if (btn) btn.classList.remove('playing'); };
+      audio.onerror = () => { previewingVoice = null; if (btn) btn.classList.remove('playing'); };
+      await audio.play();
+    } else {
+      console.warn('[TTS] MiniMax preview failed:', result.error);
+      previewingVoice = null;
+      if (btn) btn.classList.remove('playing');
+    }
+  } catch (e) {
+    console.error('[TTS] Preview error:', e);
+    previewingVoice = null;
+    if (btn) btn.classList.remove('playing');
+  }
+}
+
+async function loadMinimaxVoicesForSettings() {
+  try {
+    const config = await window.electronAPI.tts.getProviderConfig('minimax');
+    if (!config.hasKey) return;
+    const result = await window.electronAPI.tts.validateMinimax('__use_stored__');
+    if (result.success) {
+      settingsState.minimaxVoices = result.voices || [];
+      renderSettingsVoiceList();
+    }
+  } catch (e) {
+    console.warn('[TTS] Failed to load MiniMax voices:', e);
+  }
+}
+
+// Load API key status indicators
+async function loadKeyStatuses() {
+  // MiniMax
+  const mmStatus = document.getElementById('settings-minimax-status');
+  const mmInput = document.getElementById('settings-minimax-key');
+  try {
+    const config = await window.electronAPI.tts.getProviderConfig('minimax');
+    if (config.hasKey) {
+      if (mmStatus) { mmStatus.textContent = 'Key saved'; mmStatus.className = 'settings-key-status success'; }
+      if (mmInput) { mmInput.value = ''; mmInput.placeholder = config.apiKeyMasked; }
+    }
+  } catch (e) {}
+
+  // Groq
+  const groqStatus = document.getElementById('settings-groq-status');
+  const groqInput = document.getElementById('settings-groq-key');
+  try {
+    const stt = await window.electronAPI.stt.getProvider();
+    // Check if groq key exists by looking at provider config (we don't have a dedicated getter, but if groq was validated, provider is saved)
+    // Just show status based on whether groq is selected
+    if (stt.provider === 'groq') {
+      if (groqStatus) { groqStatus.textContent = 'Active'; groqStatus.className = 'settings-key-status success'; }
+    }
+  } catch (e) {}
+}
+
+// Wire up settings panel events
+document.addEventListener('DOMContentLoaded', () => {
+  // TTS settings button (speaker icon)
+  const ttsBtn = document.getElementById('tts-settings-btn');
+  if (ttsBtn) {
+    ttsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openTTSSettingsPanel();
+    });
+  }
+
+  // Global settings button (gear icon)
+  const globalBtn = document.getElementById('global-settings-btn');
+  if (globalBtn) {
+    globalBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openGlobalSettingsPanel();
+    });
+  }
+
+  // TTS panel close & done
+  const closeTtsBtn = document.getElementById('close-tts-settings');
+  if (closeTtsBtn) closeTtsBtn.addEventListener('click', (e) => { e.stopPropagation(); closeTTSSettingsPanel(); });
+  const ttsDoneBtn = document.getElementById('tts-settings-done');
+  if (ttsDoneBtn) ttsDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); closeTTSSettingsPanel(); });
+
+  // Global panel close & done
+  const closeGlobalBtn = document.getElementById('close-global-settings');
+  if (closeGlobalBtn) closeGlobalBtn.addEventListener('click', (e) => { e.stopPropagation(); closeGlobalSettingsPanel(); });
+  const globalDoneBtn = document.getElementById('global-settings-done');
+  if (globalDoneBtn) globalDoneBtn.addEventListener('click', (e) => { e.stopPropagation(); closeGlobalSettingsPanel(); });
+
+  // TTS provider pills
+  const ttsPills = document.getElementById('settings-tts-pills');
+  if (ttsPills) {
+    ttsPills.addEventListener('click', async (e) => {
+      const pill = e.target.closest('.settings-pill');
+      if (!pill) return;
+      const provider = pill.dataset.provider;
+      settingsState.currentProvider = provider;
+      updateSettingsPills('settings-tts-pills', 'provider', provider);
+      await window.electronAPI.tts.setProvider(provider);
+      await window.electronAPI.tts.setAvatarConfig(currentCharacter.id, { ttsProvider: provider });
+      renderSettingsVoiceList();
+    });
+  }
+
+  // STT provider pills
+  const sttPills = document.getElementById('settings-stt-pills');
+  if (sttPills) {
+    sttPills.addEventListener('click', async (e) => {
+      const pill = e.target.closest('.settings-pill');
+      if (!pill) return;
+      const provider = pill.dataset.stt;
+      settingsState.sttProvider = provider;
+      updateSettingsPills('settings-stt-pills', 'stt', provider);
+      await window.electronAPI.stt.setProvider(provider);
+      const groqOpts = document.getElementById('settings-groq-options');
+      if (groqOpts) groqOpts.style.display = provider === 'groq' ? '' : 'none';
+    });
+  }
+
+  // Groq model pills
+  const groqModelPills = document.getElementById('settings-groq-model-pills');
+  if (groqModelPills) {
+    groqModelPills.addEventListener('click', async (e) => {
+      const pill = e.target.closest('.settings-pill');
+      if (!pill) return;
+      const model = pill.dataset.model;
+      settingsState.groqModel = model;
+      updateSettingsPills('settings-groq-model-pills', 'model', model);
+      await window.electronAPI.stt.setGroqModel(model);
+    });
+  }
+
+  // Hotkey capture
+  const hotkeyCapture = document.getElementById('settings-hotkey-capture');
+  if (hotkeyCapture) {
+    hotkeyCapture.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (isCapturingHotkey) {
+        stopCapturing();
+        return;
+      }
+      isCapturingHotkey = true;
+      hotkeyCapture.classList.add('listening');
+      const captureText = document.getElementById('settings-capture-text');
+      const captureIcon = document.getElementById('settings-capture-icon');
+      if (captureText) captureText.textContent = 'Press key combo now...';
+      if (captureIcon) captureIcon.setAttribute('data-icon', 'mdi:record-circle');
+    });
+  }
+
+  // Hotkey presets
+  document.querySelectorAll('.settings-preset-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        const raw = JSON.parse(btn.dataset.combo);
+        const combo = {
+          ctrl: !!raw.ctrl,
+          alt: !!raw.alt,
+          shift: !!raw.shift,
+          meta: !!raw.meta,
+          code: raw.code || 'Space',
+        };
+        setPttCombo(combo);
+        stopCapturing();
+      } catch (err) {
+        console.warn('[Hotkey] Bad preset data:', err);
+      }
+    });
+  });
+
+  // MiniMax key save
+  const mmSave = document.getElementById('settings-minimax-save');
+  if (mmSave) {
+    mmSave.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const input = document.getElementById('settings-minimax-key');
+      const status = document.getElementById('settings-minimax-status');
+      const apiKey = input ? input.value.trim() : '';
+      if (!apiKey) {
+        if (status) { status.textContent = 'Please enter an API key'; status.className = 'settings-key-status error'; }
+        return;
+      }
+      mmSave.classList.add('validating');
+      if (status) { status.textContent = 'Validating...'; status.className = 'settings-key-status'; }
+      try {
+        const result = await window.electronAPI.tts.validateMinimax(apiKey);
+        if (result.success) {
+          if (status) { status.textContent = `Valid! ${(result.voices||[]).length} voices available`; status.className = 'settings-key-status success'; }
+          if (input) { input.value = ''; input.placeholder = apiKey.substring(0, 7) + '****' + apiKey.substring(apiKey.length - 4); }
+          settingsState.minimaxVoices = result.voices || [];
+          if (settingsState.currentProvider === 'minimax') renderSettingsVoiceList();
+        } else {
+          if (status) { status.textContent = result.error || 'Invalid API key'; status.className = 'settings-key-status error'; }
+        }
+      } catch (err) {
+        if (status) { status.textContent = 'Failed: ' + err.message; status.className = 'settings-key-status error'; }
+      } finally {
+        mmSave.classList.remove('validating');
+      }
+    });
+  }
+
+  // Groq key save
+  const groqSave = document.getElementById('settings-groq-save');
+  if (groqSave) {
+    groqSave.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const input = document.getElementById('settings-groq-key');
+      const status = document.getElementById('settings-groq-status');
+      const apiKey = input ? input.value.trim() : '';
+      if (!apiKey) {
+        if (status) { status.textContent = 'Please enter an API key'; status.className = 'settings-key-status error'; }
+        return;
+      }
+      groqSave.classList.add('validating');
+      if (status) { status.textContent = 'Validating...'; status.className = 'settings-key-status'; }
+      try {
+        const result = await window.electronAPI.stt.validateGroq(apiKey);
+        if (result.success) {
+          if (status) { status.textContent = 'Key valid!'; status.className = 'settings-key-status success'; }
+          if (input) { input.value = ''; input.placeholder = apiKey.substring(0, 7) + '****' + apiKey.substring(apiKey.length - 4); }
+        } else {
+          if (status) { status.textContent = result.error || 'Invalid API key'; status.className = 'settings-key-status error'; }
+        }
+      } catch (err) {
+        if (status) { status.textContent = 'Failed: ' + err.message; status.className = 'settings-key-status error'; }
+      } finally {
+        groqSave.classList.remove('validating');
+      }
+    });
+  }
+
+  // Initialize avatar name label
+  updateAvatarNameLabel();
 });
 
 minimizeBtn.addEventListener('click', (e) => {

@@ -67,11 +67,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
-  // TTS 音色选择
+  // TTS 音色选择 + Provider 设置
   tts: {
     setVoice: (voiceId) => ipcRenderer.invoke('tts:setVoice', voiceId),
     getVoice: () => ipcRenderer.invoke('tts:getVoice'),
-    stop: () => ipcRenderer.invoke('tts:stop')  // 停止 TTS 播放
+    stop: () => ipcRenderer.invoke('tts:stop'),
+    setProvider: (provider) => ipcRenderer.invoke('tts:setProvider', provider),
+    getProvider: () => ipcRenderer.invoke('tts:getProvider'),
+    setProviderConfig: (provider, config) => ipcRenderer.invoke('tts:setProviderConfig', provider, config),
+    getProviderConfig: (provider) => ipcRenderer.invoke('tts:getProviderConfig', provider),
+    validateMinimax: (apiKey) => ipcRenderer.invoke('tts:validateMinimax', apiKey),
+    setMinimaxVoice: (voiceId) => ipcRenderer.invoke('tts:setMinimaxVoice', voiceId),
+    getMinimaxVoice: () => ipcRenderer.invoke('tts:getMinimaxVoice'),
+    // Per-avatar TTS
+    switchAvatar: (avatarId) => ipcRenderer.invoke('tts:switchAvatar', avatarId),
+    setAvatarConfig: (avatarId, config) => ipcRenderer.invoke('tts:setAvatarConfig', avatarId, config),
+    getAvatarConfig: (avatarId) => ipcRenderer.invoke('tts:getAvatarConfig', avatarId),
+    // MiniMax voice preview
+    previewMinimax: (voiceId) => ipcRenderer.invoke('tts:previewMinimax', voiceId)
+  },
+
+  // Push to Talk
+  ptt: {
+    setShortcut: (combo) => ipcRenderer.invoke('ptt:setShortcut', combo),
+    onToggle: (callback) => {
+      const handler = () => callback();
+      ipcRenderer.on('ptt:toggle', handler);
+      return () => ipcRenderer.removeListener('ptt:toggle', handler);
+    }
+  },
+
+  // STT provider management (Deepgram / Groq Whisper)
+  stt: {
+    setProvider: (provider) => ipcRenderer.invoke('stt:setProvider', provider),
+    getProvider: () => ipcRenderer.invoke('stt:getProvider'),
+    validateGroq: (apiKey) => ipcRenderer.invoke('stt:validateGroq', apiKey),
+    setGroqModel: (model) => ipcRenderer.invoke('stt:setGroqModel', model),
+    transcribeGroq: (audioBase64) => ipcRenderer.invoke('stt:transcribeGroq', audioBase64)
   },
 
   // 异步任务管理

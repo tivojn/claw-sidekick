@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, shell, globalShortcut } = require('electron');
 const path = require('path');
 const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const WebSocket = require('ws');
@@ -273,7 +273,7 @@ class TTSQueueManager {
 
       try {
         // 调用 TTS 生成音频
-        const audioData = await callEdgeTTS(item.sentence);
+        const audioData = await callTTS(item.sentence);
 
         if (audioData && mainWindow && !mainWindow.isDestroyed()) {
           // 发送音频块到前端
@@ -837,6 +837,105 @@ const os = require('os');
 // 当前选择的音色（可被前端动态修改）
 let currentVoiceId = 'en-US-EmmaMultilingualNeural';
 
+// ===== TTS Provider 配置 =====
+let currentTTSProvider = 'edge';  // 'edge' | 'minimax'
+let minimaxConfig = { apiKey: '', voiceId: 'English_Graceful_Lady' };
+let currentAvatarId = 'amy'; // default avatar
+
+// ===== Settings persistence =====
+const SETTINGS_PATH = path.join(os.homedir(), '.claw-sidekick-settings.json');
+const OLD_TTS_CONFIG_PATH = path.join(os.homedir(), '.claw-sidekick-tts.json');
+
+const DEFAULT_SETTINGS = {
+  providers: {
+    minimax: { apiKey: '' },
+    groq: { apiKey: '' }
+  },
+  avatars: {
+    lobster: { ttsProvider: 'edge', edgeVoice: 'en-US-EmmaMultilingualNeural', minimaxVoice: 'English_Graceful_Lady' },
+    amy: { ttsProvider: 'edge', edgeVoice: 'zh-CN-XiaoyiNeural', minimaxVoice: 'Chinese (Mandarin)_Lyrical_Voice' },
+    cat: { ttsProvider: 'edge', edgeVoice: 'en-US-BrianMultilingualNeural', minimaxVoice: 'English_Persuasive_Man' },
+    robot: { ttsProvider: 'edge', edgeVoice: 'en-US-BrianMultilingualNeural', minimaxVoice: 'English_Lucky_Robot' }
+  },
+  stt: { provider: 'deepgram', groqModel: 'whisper-large-v3-turbo' },
+  hotkey: null,
+  connection: { provider: 'openclaw', claudeCodePath: '' }
+};
+
+let appSettings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+
+// Load settings (with migration from old format)
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      const saved = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf-8'));
+      // Deep merge with defaults (so new fields are added on upgrade)
+      appSettings = deepMerge(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), saved);
+      console.log('[Settings] Loaded from', SETTINGS_PATH);
+    } else if (fs.existsSync(OLD_TTS_CONFIG_PATH)) {
+      // Migrate from old format
+      const old = JSON.parse(fs.readFileSync(OLD_TTS_CONFIG_PATH, 'utf-8'));
+      if (old.minimax && old.minimax.apiKey) {
+        appSettings.providers.minimax.apiKey = old.minimax.apiKey;
+      }
+      if (old.minimax && old.minimax.voiceId) {
+        // Apply old minimax voice to all avatars as their minimaxVoice
+        for (const avatarId of Object.keys(appSettings.avatars)) {
+          appSettings.avatars[avatarId].minimaxVoice = old.minimax.voiceId;
+        }
+      }
+      if (old.provider) {
+        // Apply old provider to all avatars
+        for (const avatarId of Object.keys(appSettings.avatars)) {
+          appSettings.avatars[avatarId].ttsProvider = old.provider;
+        }
+      }
+      saveSettings();
+      console.log('[Settings] Migrated from old format');
+    }
+  } catch (e) {
+    console.warn('[Settings] Load failed:', e.message);
+  }
+
+  // Sync runtime state from settings
+  syncRuntimeFromSettings();
+}
+
+function deepMerge(target, source) {
+  for (const key of Object.keys(source)) {
+    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])
+        && target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+      deepMerge(target[key], source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+
+function syncRuntimeFromSettings() {
+  // Sync minimax API key into runtime config
+  minimaxConfig.apiKey = appSettings.providers.minimax.apiKey || '';
+
+  // Load current avatar's config into active state
+  const avatarCfg = appSettings.avatars[currentAvatarId] || appSettings.avatars.amy;
+  currentTTSProvider = avatarCfg.ttsProvider || 'edge';
+  currentVoiceId = avatarCfg.edgeVoice || 'en-US-EmmaMultilingualNeural';
+  minimaxConfig.voiceId = avatarCfg.minimaxVoice || 'English_Graceful_Lady';
+}
+
+function saveSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(appSettings, null, 2));
+    console.log('[Settings] Saved');
+  } catch (e) {
+    console.error('[Settings] Save failed:', e.message);
+  }
+}
+
+// Load on startup
+loadSettings();
+
 // 核心 TTS 函数（使用 edge-tts CLI）
 async function callEdgeTTS(text) {
   const tmpFile = path.join(os.tmpdir(), `edge-tts-${Date.now()}.mp3`);
@@ -867,6 +966,95 @@ async function callEdgeTTS(text) {
   });
 }
 
+// ===== MiniMax TTS =====
+const https = require('https');
+
+async function callMiniMaxTTS(text) {
+  if (!minimaxConfig.apiKey) {
+    throw new Error('MiniMax API key not configured');
+  }
+
+  console.log(`[TTS] MiniMax 生成语音: "${text.substring(0, 50)}..."`);
+
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: 'speech-2.8-hd',
+      text: text,
+      stream: false,
+      voice_setting: {
+        voice_id: minimaxConfig.voiceId || 'English_Graceful_Lady',
+        speed: 1.0,
+        vol: 1.0,
+        pitch: 0
+      },
+      audio_setting: {
+        format: 'mp3',
+        sample_rate: 32000,
+        bitrate: 128000,
+        channel: 1
+      },
+      output_format: 'hex'
+    });
+
+    const options = {
+      hostname: 'api.minimax.io',
+      path: '/v1/t2a_v2',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${minimaxConfig.apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 30000
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+
+          if (json.base_resp && json.base_resp.status_code !== 0) {
+            return reject(new Error(`MiniMax API error: ${json.base_resp.status_msg || 'Unknown error'}`));
+          }
+
+          // International API: audio is at data.audio (hex string directly)
+          const hexAudio = json.data && json.data.audio;
+          if (!hexAudio) {
+            return reject(new Error('MiniMax: no audio data in response'));
+          }
+
+          // Hex string → Buffer → base64
+          const audioBuffer = Buffer.from(hexAudio, 'hex');
+          console.log(`[TTS] MiniMax 生成音频: ${audioBuffer.length} 字节`);
+
+          if (audioBuffer.length < 100) {
+            return reject(new Error('MiniMax: audio data too small'));
+          }
+
+          resolve(audioBuffer.toString('base64'));
+        } catch (e) {
+          reject(new Error(`MiniMax: failed to parse response: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => reject(new Error(`MiniMax request failed: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('MiniMax request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ===== TTS Router =====
+async function callTTS(text) {
+  if (currentTTSProvider === 'minimax' && minimaxConfig.apiKey) {
+    return callMiniMaxTTS(text);
+  }
+  return callEdgeTTS(text);
+}
+
 // 前端设置音色
 ipcMain.handle('tts:setVoice', async (event, voiceId) => {
   console.log(`[TTS] 音色已切换: ${currentVoiceId} → ${voiceId}`);
@@ -889,13 +1077,381 @@ ipcMain.handle('tts:stop', async () => {
 // 非流式 TTS（兼容旧接口）
 ipcMain.handle('deepgram:textToSpeech', async (event, text) => {
   try {
-    const audioBase64 = await callEdgeTTS(text);
+    const audioBase64 = await callTTS(text);
     return { success: true, audio: audioBase64 };
   } catch (error) {
     console.error('[TTS] Edge-TTS failed:', error);
     return { success: false, error: error.message };
   }
 });
+
+// ===== TTS Provider 设置 =====
+ipcMain.handle('tts:setProvider', async (event, provider) => {
+  console.log(`[TTS] Provider 切换: ${currentTTSProvider} → ${provider}`);
+  currentTTSProvider = provider;
+  // 持久化
+  saveTTSConfig();
+  return { success: true };
+});
+
+ipcMain.handle('tts:getProvider', async () => {
+  return { provider: currentTTSProvider };
+});
+
+ipcMain.handle('tts:setProviderConfig', async (event, provider, config) => {
+  if (provider === 'minimax') {
+    if (config.apiKey) minimaxConfig.apiKey = config.apiKey;
+    console.log(`[TTS] MiniMax 配置已更新`);
+    saveTTSConfig();
+  }
+  return { success: true };
+});
+
+ipcMain.handle('tts:getProviderConfig', async (event, provider) => {
+  if (provider === 'minimax') {
+    return {
+      apiKeyMasked: minimaxConfig.apiKey
+        ? minimaxConfig.apiKey.substring(0, 7) + '****' + minimaxConfig.apiKey.substring(minimaxConfig.apiKey.length - 4)
+        : '',
+      hasKey: !!minimaxConfig.apiKey
+    };
+  }
+  return {};
+});
+
+// Validate MiniMax API key by fetching system voices
+ipcMain.handle('tts:validateMinimax', async (event, apiKey) => {
+  // Support re-validation with stored key
+  const keyToUse = (apiKey === '__use_stored__') ? minimaxConfig.apiKey : apiKey;
+  if (!keyToUse) {
+    return { success: false, error: 'No API key provided' };
+  }
+  console.log('[TTS] Validating MiniMax API key...');
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ voice_type: 'system' });
+
+    const req = https.request({
+      hostname: 'api.minimax.io',
+      path: '/v1/get_voice',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${keyToUse}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 15000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.base_resp && json.base_resp.status_code !== 0) {
+            console.error('[TTS] MiniMax validation failed:', json.base_resp.status_msg);
+            return resolve({ success: false, error: json.base_resp.status_msg || 'Invalid API key' });
+          }
+          // Extract system voices
+          const voices = (json.system_voice || []).map(v => ({
+            id: v.voice_id,
+            name: v.voice_name || v.voice_id,
+            desc: v.description || ''
+          }));
+          console.log(`[TTS] MiniMax validation OK, ${voices.length} voices available`);
+          // Save the key
+          minimaxConfig.apiKey = keyToUse;
+          saveTTSConfig();
+          resolve({ success: true, voices });
+        } catch (e) {
+          resolve({ success: false, error: 'Failed to parse response' });
+        }
+      });
+    });
+    req.on('error', (e) => resolve({ success: false, error: e.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ success: false, error: 'Request timed out' }); });
+    req.write(body);
+    req.end();
+  });
+});
+
+// Set MiniMax voice
+ipcMain.handle('tts:setMinimaxVoice', async (event, voiceId) => {
+  console.log(`[TTS] MiniMax voice: ${minimaxConfig.voiceId} → ${voiceId}`);
+  minimaxConfig.voiceId = voiceId;
+  saveTTSConfig();
+  return { success: true };
+});
+
+ipcMain.handle('tts:getMinimaxVoice', async () => {
+  return { voiceId: minimaxConfig.voiceId || 'English_Graceful_Lady' };
+});
+
+// ===== Per-avatar TTS routing =====
+ipcMain.handle('tts:switchAvatar', async (event, avatarId) => {
+  if (!appSettings.avatars[avatarId]) {
+    console.warn(`[TTS] Unknown avatar: ${avatarId}, using defaults`);
+    return { success: false, error: 'Unknown avatar' };
+  }
+  console.log(`[TTS] Switch avatar: ${currentAvatarId} → ${avatarId}`);
+  currentAvatarId = avatarId;
+  syncRuntimeFromSettings();
+  console.log(`[TTS] Active: provider=${currentTTSProvider}, edgeVoice=${currentVoiceId}, minimaxVoice=${minimaxConfig.voiceId}`);
+  return { success: true, provider: currentTTSProvider, edgeVoice: currentVoiceId, minimaxVoice: minimaxConfig.voiceId };
+});
+
+ipcMain.handle('tts:setAvatarConfig', async (event, avatarId, config) => {
+  if (!appSettings.avatars[avatarId]) {
+    // Allow creating config for unknown avatars
+    appSettings.avatars[avatarId] = { ...DEFAULT_SETTINGS.avatars.amy };
+  }
+  const avatar = appSettings.avatars[avatarId];
+  if (config.ttsProvider !== undefined) avatar.ttsProvider = config.ttsProvider;
+  if (config.edgeVoice !== undefined) avatar.edgeVoice = config.edgeVoice;
+  if (config.minimaxVoice !== undefined) avatar.minimaxVoice = config.minimaxVoice;
+  saveSettings();
+
+  // If this is the active avatar, update runtime state
+  if (avatarId === currentAvatarId) {
+    syncRuntimeFromSettings();
+  }
+  console.log(`[TTS] Avatar config updated: ${avatarId}`, avatar);
+  return { success: true };
+});
+
+ipcMain.handle('tts:getAvatarConfig', async (event, avatarId) => {
+  const avatar = appSettings.avatars[avatarId] || null;
+  return avatar;
+});
+
+// ===== MiniMax voice preview =====
+ipcMain.handle('tts:previewMinimax', async (event, voiceId) => {
+  const apiKey = appSettings.providers.minimax.apiKey;
+  if (!apiKey) {
+    return { success: false, error: 'MiniMax API key not configured' };
+  }
+  console.log(`[TTS] Preview MiniMax voice: ${voiceId}`);
+  try {
+    const previewText = 'Hello, this is a preview of my voice.';
+    const audio = await callMiniMaxTTSWithVoice(previewText, voiceId, apiKey);
+    return { success: true, audio };
+  } catch (error) {
+    console.error('[TTS] MiniMax preview failed:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+// MiniMax TTS with explicit voice override (used by preview)
+async function callMiniMaxTTSWithVoice(text, voiceId, apiKey) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model: 'speech-2.8-hd',
+      text: text,
+      stream: false,
+      voice_setting: {
+        voice_id: voiceId,
+        speed: 1.0,
+        vol: 1.0,
+        pitch: 0
+      },
+      audio_setting: {
+        format: 'mp3',
+        sample_rate: 32000,
+        bitrate: 128000,
+        channel: 1
+      },
+      output_format: 'hex'
+    });
+
+    const options = {
+      hostname: 'api.minimax.io',
+      path: '/v1/t2a_v2',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      },
+      timeout: 30000
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.base_resp && json.base_resp.status_code !== 0) {
+            return reject(new Error(`MiniMax API error: ${json.base_resp.status_msg || 'Unknown error'}`));
+          }
+          const hexAudio = json.data && json.data.audio;
+          if (!hexAudio) {
+            return reject(new Error('MiniMax: no audio data in response'));
+          }
+          const audioBuffer = Buffer.from(hexAudio, 'hex');
+          if (audioBuffer.length < 100) {
+            return reject(new Error('MiniMax: audio data too small'));
+          }
+          resolve(audioBuffer.toString('base64'));
+        } catch (e) {
+          reject(new Error(`MiniMax: failed to parse response: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => reject(new Error(`MiniMax request failed: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('MiniMax request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ===== Groq Whisper STT =====
+ipcMain.handle('stt:setProvider', async (event, provider) => {
+  console.log(`[STT] Provider: ${appSettings.stt.provider} → ${provider}`);
+  appSettings.stt.provider = provider;
+  saveSettings();
+  return { success: true };
+});
+
+ipcMain.handle('stt:getProvider', async () => {
+  return { provider: appSettings.stt.provider, groqModel: appSettings.stt.groqModel };
+});
+
+ipcMain.handle('stt:validateGroq', async (event, apiKey) => {
+  console.log('[STT] Validating Groq API key...');
+  try {
+    // Generate a minimal WAV file (0.5s of silence, 16kHz mono 16-bit PCM)
+    const sampleRate = 16000;
+    const duration = 0.5;
+    const numSamples = Math.floor(sampleRate * duration);
+    const dataSize = numSamples * 2; // 16-bit = 2 bytes per sample
+    const wavHeaderSize = 44;
+    const wavBuffer = Buffer.alloc(wavHeaderSize + dataSize);
+
+    // WAV header
+    wavBuffer.write('RIFF', 0);
+    wavBuffer.writeUInt32LE(wavHeaderSize + dataSize - 8, 4);
+    wavBuffer.write('WAVE', 8);
+    wavBuffer.write('fmt ', 12);
+    wavBuffer.writeUInt32LE(16, 16); // fmt chunk size
+    wavBuffer.writeUInt16LE(1, 20);  // PCM format
+    wavBuffer.writeUInt16LE(1, 22);  // mono
+    wavBuffer.writeUInt32LE(sampleRate, 24);
+    wavBuffer.writeUInt32LE(sampleRate * 2, 28); // byte rate
+    wavBuffer.writeUInt16LE(2, 32);  // block align
+    wavBuffer.writeUInt16LE(16, 34); // bits per sample
+    wavBuffer.write('data', 36);
+    wavBuffer.writeUInt32LE(dataSize, 40);
+    // Data is already zeros (silence)
+
+    const result = await groqTranscribe(wavBuffer, apiKey, appSettings.stt.groqModel);
+    // Key is valid, save it
+    appSettings.providers.groq.apiKey = apiKey;
+    saveSettings();
+    console.log('[STT] Groq API key validated OK');
+    return { success: true };
+  } catch (error) {
+    console.error('[STT] Groq validation failed:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('stt:setGroqModel', async (event, model) => {
+  console.log(`[STT] Groq model: ${appSettings.stt.groqModel} → ${model}`);
+  appSettings.stt.groqModel = model;
+  saveSettings();
+  return { success: true };
+});
+
+ipcMain.handle('stt:transcribeGroq', async (event, audioBase64) => {
+  const apiKey = appSettings.providers.groq.apiKey;
+  if (!apiKey) {
+    return { success: false, error: 'Groq API key not configured' };
+  }
+  try {
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    const result = await groqTranscribe(audioBuffer, apiKey, appSettings.stt.groqModel);
+    return { success: true, text: result };
+  } catch (error) {
+    console.error('[STT] Groq transcription failed:', error.message);
+    return { success: false, error: error.message };
+  }
+});
+
+// Groq transcription helper (manual multipart form data, no external deps)
+function groqTranscribe(audioBuffer, apiKey, model) {
+  return new Promise((resolve, reject) => {
+    const boundary = '----FormBoundary' + Date.now().toString(36) + Math.random().toString(36).substr(2);
+    const fileName = 'audio.wav';
+
+    // Build multipart body
+    const parts = [];
+
+    // File field
+    parts.push(Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
+      `Content-Type: audio/wav\r\n\r\n`
+    ));
+    parts.push(audioBuffer);
+    parts.push(Buffer.from('\r\n'));
+
+    // Model field
+    parts.push(Buffer.from(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="model"\r\n\r\n` +
+      `${model || 'whisper-large-v3-turbo'}\r\n`
+    ));
+
+    // Closing boundary
+    parts.push(Buffer.from(`--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+
+    const options = {
+      hostname: 'api.groq.com',
+      path: '/openai/v1/audio/transcriptions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': body.length
+      },
+      timeout: 30000
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode !== 200) {
+            return reject(new Error(json.error?.message || `Groq API error (${res.statusCode})`));
+          }
+          resolve(json.text || '');
+        } catch (e) {
+          reject(new Error(`Groq: failed to parse response: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (e) => reject(new Error(`Groq request failed: ${e.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Groq request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function saveTTSConfig() {
+  // Sync runtime state back into settings
+  appSettings.providers.minimax.apiKey = minimaxConfig.apiKey || '';
+  if (currentAvatarId && appSettings.avatars[currentAvatarId]) {
+    appSettings.avatars[currentAvatarId].ttsProvider = currentTTSProvider;
+    appSettings.avatars[currentAvatarId].edgeVoice = currentVoiceId;
+    appSettings.avatars[currentAvatarId].minimaxVoice = minimaxConfig.voiceId;
+  }
+  saveSettings();
+}
 
 // ===== 窗口控制 =====
 const FULL_WIDTH = 330;
@@ -969,6 +1525,56 @@ ipcMain.handle('file:showInFolder', async (event, filePath) => {
   }
 });
 
+// ===== PTT globalShortcut =====
+let registeredPTTShortcut = null;
+
+function comboToAccelerator(combo) {
+  if (!combo || combo.code === 'fn') return null; // fn not detectable
+  const parts = [];
+  if (combo.alt) parts.push('Alt');
+  if (combo.ctrl) parts.push('CommandOrControl');
+  if (combo.shift) parts.push('Shift');
+  if (combo.meta) parts.push('Super');
+
+  // Map code to Electron accelerator key name
+  const code = combo.code || '';
+  if (code === 'Space') parts.push('Space');
+  else if (code.startsWith('Key')) parts.push(code.slice(3));
+  else if (code.startsWith('Digit')) parts.push(code.slice(5));
+  else if (/^F\d+$/.test(code)) parts.push(code);
+  else return null;
+
+  return parts.join('+');
+}
+
+function registerPTTShortcut(combo) {
+  // Unregister previous
+  if (registeredPTTShortcut) {
+    try { globalShortcut.unregister(registeredPTTShortcut); } catch (e) {}
+    registeredPTTShortcut = null;
+  }
+  const accel = comboToAccelerator(combo);
+  if (!accel) return;
+  try {
+    globalShortcut.register(accel, () => {
+      // Send PTT toggle event to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ptt:toggle');
+      }
+    });
+    registeredPTTShortcut = accel;
+    console.log('[PTT] Registered global shortcut:', accel);
+  } catch (e) {
+    console.warn('[PTT] Failed to register shortcut:', accel, e.message);
+  }
+}
+
+// IPC to update PTT shortcut from renderer
+ipcMain.handle('ptt:setShortcut', (event, combo) => {
+  registerPTTShortcut(combo);
+  return { success: true };
+});
+
 // ===== 应用生命周期 =====
 app.whenReady().then(() => {
   createWindow();
@@ -978,11 +1584,14 @@ app.whenReady().then(() => {
   }).catch(err => {
     console.warn('[启动] Clawdbot 预连接失败（首次对话时会重试）:', err.message);
   });
-  // 注意：Deepgram 不在此处预连接，而是在首次 startListening 时创建
-  // 因为 Deepgram 连接需要前端准备好音频流
+  // Register default PTT shortcut (Option+Space)
+  const savedCombo = appSettings.hotkey || { alt: true, code: 'Space' };
+  registerPTTShortcut(savedCombo);
 });
 
 app.on('window-all-closed', () => {
+  // Unregister global shortcuts
+  globalShortcut.unregisterAll();
   // 清理 Deepgram 连接
   isListeningActive = false;
   if (deepgramKeepAlive) { clearInterval(deepgramKeepAlive); deepgramKeepAlive = null; }
