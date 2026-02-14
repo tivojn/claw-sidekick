@@ -128,7 +128,7 @@ const CHARACTER_PROFILES = {
   },
   og_lobster: {
     id: 'og_lobster',
-    name: 'Lobster',
+    name: 'Clawbot',
     desc: 'The OG animated lobster',
     icon: 'mdi:shrimp',
     welcomeText: "Snip snap! I'm the original lobster, ready to help!",
@@ -278,10 +278,21 @@ function startChromaKey(videoSrc) {
       ctx.drawImage(video, 0, 0);
       const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = frame.data;
-      const threshold = 220;
+      // Saturation + luminance chroma key: removes white bg AND gray shadow
       for (let i = 0; i < d.length; i += 4) {
-        if (d[i] > threshold && d[i + 1] > threshold && d[i + 2] > threshold) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        const mx = Math.max(r, g, b);
+        const mn = Math.min(r, g, b);
+        const sat = mx > 0 ? (mx - mn) / mx : 0; // 0-1
+        const lum = r * 0.299 + g * 0.587 + b * 0.114; // 0-255
+        if (sat < 0.08 && lum > 140) {
+          // Pure bg / shadow → fully transparent
           d[i + 3] = 0;
+        } else if (sat < 0.18 && lum > 120) {
+          // Soft edge zone → gradual fade
+          const satFade = (sat - 0.08) / 0.10; // 0→1 as sat goes 0.08→0.18
+          const lumFade = lum > 200 ? 0 : (200 - lum) / 80; // fade more at higher lum
+          d[i + 3] = Math.round(255 * Math.min(1, Math.max(satFade, lumFade)));
         }
       }
       ctx.putImageData(frame, 0, 0);
@@ -297,6 +308,21 @@ function switchChromaVideo(newSrc) {
   if (video.src.endsWith(newSrc)) return;
   video.src = newSrc;
   video.play().catch(() => {});
+}
+
+// Preload all video sources for a character so switching states is instant
+const _preloadedVideos = new Set();
+function preloadCharacterVideos(char) {
+  if (!char.videos) return;
+  Object.values(char.videos).forEach(src => {
+    if (_preloadedVideos.has(src)) return;
+    _preloadedVideos.add(src);
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.muted = true;
+    v.src = src;
+    v.load();
+  });
 }
 
 function stopChromaKey() {
@@ -481,6 +507,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (currentCharacter.useVideo) {
       const live2dCanvas = document.getElementById('live2d-canvas');
       if (live2dCanvas) live2dCanvas.style.display = 'none';
+      preloadCharacterVideos(currentCharacter);
       startChromaKey(currentCharacter.videos.idle);
     } else if (currentCharacter.model) {
       await live2dRenderer.loadModel(currentCharacter.model);
@@ -578,12 +605,15 @@ function setAppState(newState) {
   }
 
   // Update avatar state (Live2D or video)
-  if (currentCharacter.useVideo) {
-    if (currentCharacter.videos[newState]) {
-      switchChromaVideo(currentCharacter.videos[newState]);
+  // Don't trigger speaking/welcome animations here — those are synced to audio.onplay
+  if (newState !== 'speaking' && newState !== 'welcome') {
+    if (currentCharacter.useVideo) {
+      if (currentCharacter.videos[newState]) {
+        switchChromaVideo(currentCharacter.videos[newState]);
+      }
+    } else if (live2dRenderer) {
+      live2dRenderer.setState(newState);
     }
-  } else if (live2dRenderer) {
-    live2dRenderer.setState(newState);
   }
 
   switch (newState) {
@@ -1028,14 +1058,10 @@ function initStreamingTTS() {
     }
   });
 
-  // 监听首个句子（切换状态，但不提前显示文本）
+  // 监听首个句子（仅日志，状态切换延迟到音频实际播放时）
   window.electronAPI.deepgram.onFirstSentence((data) => {
-    console.log('[TTS] 首句到达，准备播放');
-    // 切换到 speaking 状态
-    if (appState === 'thinking') {
-      setAppState('speaking');
-    }
-    // 不提前显示文本，等音频播放时再显示
+    console.log('[TTS] 首句到达，等待音频播放');
+    // Don't switch state here — wait for audio.onplay to sync with lip movement
   });
 }
 
@@ -1055,12 +1081,8 @@ async function processAudioQueue() {
   isPlayingQueue = false;
   isSpeaking = false;
 
-  // Log the full streamed response to chat history (only once)
-  if (streamingTextBuffer) {
-    const fullResponse = streamingTextBuffer;
-    streamingTextBuffer = '';
-    addChatMessage('assistant', fullResponse);
-  }
+  // Clear streaming text buffer (chat message is logged from handleSyncTask to prevent duplicates)
+  streamingTextBuffer = '';
 
   // TTS 播放完毕，回到 idle
   // Always reset isProcessing when streaming finishes to prevent stuck state
@@ -1079,8 +1101,21 @@ function playAudioChunk(audioBase64, text) {
     const audioDataUrl = 'data:audio/mp3;base64,' + audioBase64;
     const audio = new Audio(audioDataUrl);
 
-    // 音频开始播放时才显示文本 + start lip sync
+    // 音频开始播放时才显示文本 + start lip sync (synced to actual audio)
     audio.onplay = () => {
+      // Switch to speaking state on first actual audio playback
+      if (appState !== 'speaking') {
+        setAppState('speaking');
+      }
+
+      // Sync avatar animation to audio playback
+      if (currentCharacter.useVideo && currentCharacter.videos.speaking) {
+        switchChromaVideo(currentCharacter.videos.speaking);
+      } else if (live2dRenderer) {
+        live2dRenderer.setState('speaking');
+        live2dRenderer._startSimulatedLipSync();
+      }
+
       // 追加文本到缓冲区并更新显示
       if (streamingTextBuffer && !streamingTextBuffer.includes(text)) {
         streamingTextBuffer += text;
@@ -1088,15 +1123,13 @@ function playAudioChunk(audioBase64, text) {
         streamingTextBuffer = text;
       }
       showBubble(escapeHtml(streamingTextBuffer));
-
-      // Start Live2D lip sync with simulated mouth movement
-      if (live2dRenderer) {
-        live2dRenderer._startSimulatedLipSync();
-      }
     };
 
     audio.onended = () => {
-      // Stop lip sync when audio chunk ends
+      // Stop lip sync / revert video when audio chunk ends
+      if (currentCharacter.useVideo && currentCharacter.videos.idle) {
+        switchChromaVideo(currentCharacter.videos.idle);
+      }
       if (live2dRenderer) {
         live2dRenderer.stopSpeaking();
       }
@@ -1104,6 +1137,9 @@ function playAudioChunk(audioBase64, text) {
     };
 
     audio.onerror = () => {
+      if (currentCharacter.useVideo && currentCharacter.videos.idle) {
+        switchChromaVideo(currentCharacter.videos.idle);
+      }
       if (live2dRenderer) {
         live2dRenderer.stopSpeaking();
       }
@@ -1389,12 +1425,16 @@ async function handleSyncTask(command, isGoodbye) {
     // 缓存 AI 回复（用于打断后查看）
     lastAIResponse = cleanedMessage;
 
-    // Only use non-streaming fallback if NO streaming chunks were received at all
-    // (streamingChunksReceived tracks this to avoid race conditions with slow TTS providers)
-    if (streamingChunksReceived === 0 && audioQueue.length === 0 && !isPlayingQueue) {
-      // No streaming audio received — use traditional TTS
-      addChatMessage('assistant', cleanedMessage);
-      setAppState('speaking');
+    // Use the authoritative flag from main process to decide streaming vs non-streaming.
+    // Previously used renderer-side streamingChunksReceived which races with IPC delivery,
+    // causing duplicate addChatMessage + playTextToSpeech when chunks arrive after this check.
+    const streamingUsed = result.streamingTTSInitiated || streamingChunksReceived > 0 || audioQueue.length > 0 || isPlayingQueue;
+
+    // Always log chat message here (single source of truth to prevent duplicates)
+    addChatMessage('assistant', cleanedMessage);
+
+    if (!streamingUsed) {
+      // No streaming audio was initiated — use traditional TTS
       await playTextToSpeech(cleanedMessage);
 
       if (isGoodbye) {
@@ -1448,8 +1488,12 @@ async function playTextToSpeech(text) {
 
     return new Promise((resolve) => {
       audioPlayer.onplay = () => {
-        // Start Live2D lip sync
-        if (live2dRenderer) {
+        // Sync speaking state + avatar animation to actual audio playback
+        if (appState !== 'speaking') setAppState('speaking');
+        if (currentCharacter.useVideo && currentCharacter.videos.speaking) {
+          switchChromaVideo(currentCharacter.videos.speaking);
+        } else if (live2dRenderer) {
+          live2dRenderer.setState('speaking');
           live2dRenderer._startSimulatedLipSync();
         }
       };
@@ -1457,6 +1501,9 @@ async function playTextToSpeech(text) {
       audioPlayer.onended = () => {
         isSpeaking = false;
         audioPlayer = null;
+        if (currentCharacter.useVideo && currentCharacter.videos.idle) {
+          switchChromaVideo(currentCharacter.videos.idle);
+        }
         if (live2dRenderer) {
           live2dRenderer.stopSpeaking();
         }
@@ -1467,6 +1514,9 @@ async function playTextToSpeech(text) {
         console.error('[App] TTS playback error:', e);
         isSpeaking = false;
         audioPlayer = null;
+        if (currentCharacter.useVideo && currentCharacter.videos.idle) {
+          switchChromaVideo(currentCharacter.videos.idle);
+        }
         if (live2dRenderer) {
           live2dRenderer.stopSpeaking();
         }
@@ -1598,29 +1648,20 @@ function updateCarouselUI() {
   }
 }
 
-// Swipe gesture on avatar area
-(function initSwipeGesture() {
+// Swipe gesture disabled — use carousel arrows/dots instead
+
+// Hide interaction hint after first avatar click
+(function initInteractionHint() {
+  const hint = document.getElementById('interaction-hint');
   const area = document.getElementById('lobster-area');
-  if (!area) return;
-  let startX = 0, startY = 0, swiping = false;
-  area.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.tap-hint, .carousel-arrow, .carousel-dot, .chat-log, .chat-log-resize')) return;
-    startX = e.clientX;
-    startY = e.clientY;
-    swiping = true;
-  });
-  area.addEventListener('pointermove', (e) => {
-    if (!swiping) return;
-    const dx = e.clientX - startX;
-    const dy = Math.abs(e.clientY - startY);
-    if (Math.abs(dx) > 50 && dy < 80) {
-      swiping = false;
-      if (dx < 0) carouselNext();
-      else carouselPrev();
-    }
-  });
-  area.addEventListener('pointerup', () => { swiping = false; });
-  area.addEventListener('pointercancel', () => { swiping = false; });
+  if (!hint || !area) return;
+  let dismissed = false;
+  area.addEventListener('click', () => {
+    if (dismissed) return;
+    dismissed = true;
+    hint.style.opacity = '0';
+    setTimeout(() => { hint.style.display = 'none'; }, 400);
+  }, { once: false });
 })();
 
 function updateAvatarNameLabel() {
@@ -1665,6 +1706,7 @@ async function switchCharacter(characterId) {
   if (newChar.useVideo) {
     // Switch to video mode: hide Live2D, show chroma-keyed video
     if (live2dCanvas) live2dCanvas.style.display = 'none';
+    preloadCharacterVideos(newChar);
     startChromaKey(newChar.videos.idle);
   } else {
     // Switch to Live2D mode: stop chroma video, show Live2D

@@ -750,7 +750,8 @@ ipcMain.handle('openclaw:executeCommand', async (event, command) => {
   try {
     const reply = await executeAICommand(command);
     console.log(`[CMD] ${provider} 回复: ${reply}`);
-    return { type: 'chat', data: null, message: reply };
+    // Include whether streaming TTS was initiated so renderer can avoid duplicate playback
+    return { type: 'chat', data: null, message: reply, streamingTTSInitiated: sentenceCounter > 0 };
   } catch (error) {
     console.error(`[CMD] ${provider} 调用失败:`, error.message);
     const hint = provider === 'claude-code'
