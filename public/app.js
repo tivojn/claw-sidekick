@@ -165,7 +165,7 @@ let VIDEO_SOURCES = { ...currentCharacter.videos };
 // Follow-up timeout (30s no response → idle)
 const FOLLOWUP_TIMEOUT = 30000;
 // Bubble auto-hide time
-const BUBBLE_AUTO_HIDE = 12000;
+const BUBBLE_AUTO_HIDE = 25000;
 // Execute delay after user pause
 const EXECUTE_DELAY = 3000;
 
@@ -435,9 +435,9 @@ function showBubbleWithViewBtn(fullText, isInterrupted = false) {
   }, BUBBLE_AUTO_HIDE * 2); // 打断后给更长的展示时间
 }
 
-// 追加"查看全文"按钮到气泡底部
+// 追加"查看全文"按钮到气泡底部 (only for 5+ lines worth of text)
 function appendViewTextBtn(fullText, label) {
-  if (!fullText || fullText.length < 20) return; // 短文本不需要按钮
+  if (!fullText || fullText.length < 120) return; // only show for longer text (~5+ lines)
 
   const btnWrap = document.createElement('div');
   btnWrap.className = 'view-text-btn-wrap';

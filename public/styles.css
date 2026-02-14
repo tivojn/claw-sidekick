@@ -189,7 +189,7 @@ body.mini-mode html {
   width: 100%;
   height: 100%;
   background: var(--bg-primary);
-  border-radius: 24px;
+  border-radius: clamp(16px, 4vw, 24px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -201,16 +201,16 @@ body.mini-mode html {
 /* ===== 语音气泡 ===== */
 .speech-bubble {
   position: absolute;
-  bottom: 170px;
-  left: 10px;
-  right: 10px;
-  padding: 14px 18px;
+  bottom: clamp(80px, 30%, 170px);
+  left: 6%;
+  right: 6%;
+  padding: clamp(8px, 2vw, 14px) clamp(10px, 3vw, 18px);
   background: rgba(60, 60, 80, 0.37);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   backdrop-filter: blur(24px) saturate(180%);
-  border-radius: 18px;
+  border-radius: clamp(12px, 3.5vw, 18px);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  max-height: 120px;
+  max-height: clamp(80px, 25vh, 120px);
   overflow-y: auto;
   animation: bubbleIn 0.3s ease-out;
   -webkit-app-region: no-drag;
@@ -224,7 +224,7 @@ body.mini-mode html {
 .speech-bubble::-webkit-scrollbar { display: none; }
 
 .bubble-content {
-  font-size: 13px;
+  font-size: clamp(11px, 2.5vw, 13px);
   line-height: 1.6;
   color: #ffffff;
   word-break: break-word;
@@ -270,23 +270,23 @@ body.mini-mode html {
 /* 气泡内预览文本 */
 .bubble-preview {
   color: #ffffff;
-  font-size: 13px;
+  font-size: clamp(11px, 2.5vw, 13px);
 }
 
 /* 查看全文按钮 */
 .view-text-btn-wrap {
-  margin-top: 8px;
+  margin-top: clamp(4px, 1.5vw, 8px);
   text-align: center;
 }
 
 .view-text-btn {
   display: inline-block;
-  padding: 4px 14px;
+  padding: clamp(3px, 0.8vw, 4px) clamp(8px, 2.5vw, 14px);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
+  border-radius: clamp(8px, 2.5vw, 12px);
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
-  font-size: 11px;
+  font-size: clamp(9px, 2vw, 11px);
   cursor: pointer;
   transition: all 0.2s;
   -webkit-app-region: no-drag;
@@ -302,10 +302,11 @@ body.mini-mode html {
 .text-viewer {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(40, 40, 55, 0.92);
+  background: rgba(60, 60, 80, 0.37);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   backdrop-filter: blur(24px) saturate(180%);
-  border-radius: 24px;
+  border-radius: clamp(16px, 4vw, 24px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -323,38 +324,38 @@ body.mini-mode html {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px 10px;
+  padding: clamp(10px, 2.5vw, 14px) clamp(12px, 3vw, 16px) clamp(6px, 2vw, 10px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   flex-shrink: 0;
 }
 
 .text-viewer-title {
-  font-size: 14px;
+  font-size: clamp(12px, 2.5vw, 14px);
   font-weight: 600;
   color: #ffffff;
 }
 
 .text-viewer-close {
-  width: 24px; height: 24px;
+  width: clamp(20px, 4.5vw, 24px); height: clamp(20px, 4.5vw, 24px);
   border: none; border-radius: 50%;
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.7);
-  font-size: 14px;
+  font-size: clamp(11px, 2.5vw, 14px);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: all 0.2s;
 }
 
 .text-viewer-close:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
 }
 
 .text-viewer-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
-  font-size: 14px;
+  padding: clamp(10px, 3vw, 16px);
+  font-size: clamp(12px, 2.5vw, 14px);
   line-height: 1.8;
   color: #ffffff;
   word-break: break-word;
@@ -370,11 +371,11 @@ body.mini-mode html {
 
 /* ===== 状态提示 ===== */
 .status-hint {
-  font-size: 12px;
+  font-size: clamp(10px, 2.2vw, 12px);
   color: var(--text-muted);
   text-align: center;
-  padding: 4px 0;
-  min-height: 20px;
+  padding: clamp(2px, 0.8vw, 4px) 0;
+  min-height: clamp(14px, 3.5vw, 20px);
   transition: all 0.3s;
 }
 
@@ -461,32 +462,32 @@ body.mini-mode html {
 /* ===== 点击开始对话引导 ===== */
 .tap-hint {
   position: absolute;
-  bottom: 45px;
+  bottom: clamp(25px, 8vh, 45px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
+  gap: clamp(3px, 1vw, 5px);
+  padding: clamp(3px, 0.8vw, 4px) clamp(8px, 2.5vw, 14px);
   background: rgba(255, 255, 255, 0.35);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   backdrop-filter: blur(16px) saturate(150%);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
+  border-radius: clamp(10px, 2.5vw, 14px);
   cursor: pointer;
   pointer-events: none;
   white-space: nowrap;
 }
 
 .tap-hint .tap-icon {
-  font-size: 16px;
+  font-size: clamp(12px, 3vw, 16px);
   color: rgba(55, 53, 47, 0.5);
   animation: tapIconBounce 1.5s ease-in-out infinite;
 }
 
 .tap-hint .tap-text {
-  font-size: 13px;
+  font-size: clamp(10px, 2.5vw, 13px);
   font-weight: 400;
   color: var(--text-primary);
   letter-spacing: 0.5px;
@@ -519,8 +520,8 @@ body.mini-mode html {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 200px;
-  height: 200px;
+  width: clamp(120px, 50vw, 200px);
+  height: clamp(120px, 50vw, 200px);
   border-radius: 50%;
   z-index: 3;
   pointer-events: none;
@@ -563,30 +564,56 @@ body.mini-mode html {
   }
 }
 
-/* ===== Fold toggle ===== */
+/* ===== Drag bar (always visible) ===== */
+.drag-bar {
+  width: 80%;
+  margin: auto auto 0;
+  padding: clamp(4px, 1vw, 6px) 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(4px, 1.5vw, 8px);
+  -webkit-app-region: drag;
+  cursor: grab;
+  z-index: 20;
+  position: relative;
+}
+
+.drag-grip-line {
+  flex: 1;
+  height: 4px;
+  border-top: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-bottom: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 1px;
+  transition: border-color 0.2s;
+}
+
+.drag-bar:hover .drag-grip-line {
+  border-top-color: rgba(255, 255, 255, 0.55);
+  border-bottom-color: rgba(255, 255, 255, 0.55);
+}
+
+/* ===== Fold toggle (inside drag bar) ===== */
 .fold-toggle {
-  width: 32px; height: 18px;
+  width: clamp(26px, 6vw, 32px); height: clamp(14px, 3.5vw, 18px);
   border: none;
-  border-radius: 9px 9px 0 0;
+  border-radius: clamp(6px, 1.5vw, 9px);
   background: rgba(100, 100, 120, 0.25);
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: auto auto 0;
   padding: 0;
   -webkit-app-region: no-drag;
   transition: background 0.2s, transform 0.3s;
   flex-shrink: 0;
-  z-index: 20;
-  position: relative;
 }
 .fold-toggle:hover {
   background: rgba(100, 100, 120, 0.45);
 }
 .fold-toggle .iconify {
-  font-size: 14px;
+  font-size: clamp(11px, 2.5vw, 14px);
   transition: transform 0.3s;
 }
 .fold-toggle.folded .iconify {
@@ -597,13 +624,13 @@ body.mini-mode html {
 .bottom-panel {
   width: 100%;
   overflow: hidden;
-  max-height: 120px;
+  max-height: clamp(90px, 25vh, 150px);
   transition: max-height 0.3s ease, opacity 0.3s ease;
   opacity: 1;
   background: rgba(255, 255, 255, 0.7);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
-  border-radius: 16px 16px 24px 24px;
+  border-radius: clamp(10px, 3vw, 16px) clamp(10px, 3vw, 16px) clamp(16px, 4vw, 24px) clamp(16px, 4vw, 24px);
   border-top: 1px solid rgba(255, 255, 255, 0.35);
   -webkit-app-region: drag;
   z-index: 20;
@@ -625,7 +652,7 @@ body.mini-mode html {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 8px 16px 4px;
+  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 3vw, 16px) clamp(2px, 0.8vw, 4px);
   -webkit-app-region: no-drag;
 }
 
@@ -633,20 +660,20 @@ body.mini-mode html {
 .text-input-area {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: clamp(4px, 1.5vw, 8px);
   width: 100%;
-  padding: 8px 16px 12px;
+  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 3vw, 16px) clamp(6px, 2vw, 12px);
   -webkit-app-region: no-drag;
 }
 
 .text-input {
   flex: 1;
-  padding: 8px 12px;
+  padding: clamp(5px, 1.5vw, 8px) clamp(8px, 2.5vw, 12px);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  color: var(--text-primary);
-  font-size: 13px;
+  border-radius: clamp(8px, 2.5vw, 12px);
+  color: rgba(30, 41, 59, 0.75);
+  font-size: clamp(11px, 2.5vw, 13px);
   outline: none;
   transition: all 0.2s;
 }
@@ -662,13 +689,13 @@ body.mini-mode html {
 }
 
 .send-btn {
-  width: 28px;
-  height: 28px;
+  width: clamp(22px, 5vw, 28px);
+  height: clamp(22px, 5vw, 28px);
   border: none;
-  border-radius: 8px;
+  border-radius: clamp(6px, 1.5vw, 8px);
   background: transparent;
   color: rgba(55, 53, 47, 0.4);
-  font-size: 15px;
+  font-size: clamp(12px, 3vw, 15px);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -689,11 +716,11 @@ body.mini-mode html {
 .state-indicator {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: clamp(4px, 1.2vw, 6px);
 }
 
 .state-dot {
-  width: 6px; height: 6px;
+  width: clamp(4px, 1.2vw, 6px); height: clamp(4px, 1.2vw, 6px);
   border-radius: 50%;
   background: #22c55e;
   flex-shrink: 0;
@@ -705,22 +732,22 @@ body.mini-mode html {
 .state-dot.speaking { background: #7c3aed; animation: pulse 1.2s ease-in-out infinite; }
 
 .state-text {
-  font-size: 11px;
+  font-size: clamp(9px, 2vw, 11px);
   color: var(--text-muted);
   transition: color 0.3s;
 }
 
 .widget-controls {
   display: flex;
-  gap: 4px;
+  gap: clamp(2px, 0.8vw, 4px);
 }
 
 .tiny-btn {
-  width: 24px; height: 24px;
-  border: none; border-radius: 6px;
+  width: clamp(18px, 4.5vw, 24px); height: clamp(18px, 4.5vw, 24px);
+  border: none; border-radius: clamp(4px, 1.2vw, 6px);
   background: transparent;
   color: rgba(55, 53, 47, 0.4);
-  font-size: 14px;
+  font-size: clamp(11px, 2.5vw, 14px);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: all 0.15s;
@@ -814,7 +841,7 @@ body.mini-mode html {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background: var(--bg-primary);
-  border-radius: 24px;
+  border-radius: clamp(16px, 4vw, 24px);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -827,13 +854,13 @@ body.mini-mode html {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px 10px;
+  padding: clamp(10px, 2.5vw, 14px) clamp(12px, 3vw, 16px) clamp(6px, 2vw, 10px);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
 .voice-panel-title {
-  font-size: 14px;
+  font-size: clamp(12px, 2.5vw, 14px);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -841,7 +868,7 @@ body.mini-mode html {
 .voice-list {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 12px 12px;
+  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 2.5vw, 12px) clamp(8px, 2.5vw, 12px);
 }
 
 .voice-list::-webkit-scrollbar { width: 4px; }
@@ -859,9 +886,9 @@ body.mini-mode html {
 .voice-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  gap: clamp(6px, 2vw, 10px);
+  padding: clamp(5px, 1.5vw, 8px) clamp(6px, 2vw, 10px);
+  border-radius: clamp(7px, 2vw, 10px);
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 2px;
@@ -877,8 +904,8 @@ body.mini-mode html {
 }
 
 .voice-item .voice-icon {
-  font-size: 18px;
-  width: 28px;
+  font-size: clamp(14px, 3.5vw, 18px);
+  width: clamp(22px, 5vw, 28px);
   text-align: center;
   flex-shrink: 0;
   color: var(--accent-primary);
@@ -890,13 +917,13 @@ body.mini-mode html {
 }
 
 .voice-item .voice-name {
-  font-size: 12px;
+  font-size: clamp(10px, 2.2vw, 12px);
   color: var(--text-primary);
   font-weight: 500;
 }
 
 .voice-item .voice-desc {
-  font-size: 10px;
+  font-size: clamp(8px, 1.8vw, 10px);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -912,19 +939,19 @@ body.mini-mode html {
 /* 筛选按钮组 */
 .voice-filter {
   display: flex;
-  gap: 6px;
-  padding: 0 12px 8px;
+  gap: clamp(4px, 1.2vw, 6px);
+  padding: 0 clamp(8px, 2.5vw, 12px) clamp(4px, 1.5vw, 8px);
   flex-shrink: 0;
 }
 
 .filter-btn {
   flex: 1;
-  padding: 6px 0;
+  padding: clamp(4px, 1.2vw, 6px) 0;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: clamp(6px, 1.5vw, 8px);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: clamp(9px, 2vw, 11px);
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -965,7 +992,7 @@ body.mini-mode html {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   background: var(--bg-primary);
-  border-radius: 24px;
+  border-radius: clamp(16px, 4vw, 24px);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -978,13 +1005,13 @@ body.mini-mode html {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 16px 10px;
+  padding: clamp(10px, 2.5vw, 14px) clamp(12px, 3vw, 16px) clamp(6px, 2vw, 10px);
   border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
 .character-panel-title {
-  font-size: 14px;
+  font-size: clamp(12px, 2.5vw, 14px);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -992,10 +1019,10 @@ body.mini-mode html {
 .character-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: clamp(8px, 2vw, 12px);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: clamp(4px, 1.5vw, 8px);
 }
 
 .character-list::-webkit-scrollbar { width: 4px; }
@@ -1004,9 +1031,9 @@ body.mini-mode html {
 .character-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 14px;
+  gap: clamp(6px, 2.5vw, 12px);
+  padding: clamp(8px, 2.5vw, 14px) clamp(10px, 3vw, 16px);
+  border-radius: clamp(10px, 2.5vw, 14px);
   cursor: pointer;
   transition: all 0.25s ease;
   background: var(--bg-secondary);
@@ -1060,14 +1087,14 @@ body.mini-mode html {
 }
 
 .character-item .character-icon {
-  font-size: 24px;
-  width: 48px;
-  height: 48px;
+  font-size: clamp(18px, 4.5vw, 24px);
+  width: clamp(32px, 9vw, 48px);
+  height: clamp(32px, 9vw, 48px);
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--bg-tertiary);
-  border-radius: 12px;
+  border-radius: clamp(8px, 2.5vw, 12px);
   flex-shrink: 0;
   position: relative;
   z-index: 1;
@@ -1082,14 +1109,14 @@ body.mini-mode html {
 }
 
 .character-item .character-name {
-  font-size: 14px;
+  font-size: clamp(11px, 2.5vw, 14px);
   color: var(--text-primary);
   font-weight: 600;
   margin-bottom: 2px;
 }
 
 .character-item .character-desc {
-  font-size: 11px;
+  font-size: clamp(9px, 2vw, 11px);
   color: var(--text-muted);
 }
 

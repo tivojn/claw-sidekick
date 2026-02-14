@@ -39,10 +39,14 @@
       </div>
     </div>
 
-    <!-- Fold toggle -->
-    <button id="fold-toggle" class="fold-toggle" title="Text Me">
-      <span class="iconify" data-icon="mdi:chevron-down"></span>
-    </button>
+    <!-- Drag bar (always visible, wraps fold toggle) -->
+    <div class="drag-bar" title="Drag to move">
+      <div class="drag-grip-line"></div>
+      <button id="fold-toggle" class="fold-toggle" title="Text Me">
+        <span class="iconify" data-icon="mdi:chevron-down"></span>
+      </button>
+      <div class="drag-grip-line"></div>
+    </div>
 
     <!-- Foldable bottom panel -->
     <div class="bottom-panel" id="bottom-panel">
