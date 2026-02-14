@@ -40,13 +40,13 @@ const CHARACTER_PROFILES = {
     ],
     model: 'models/haru/haru_greeter_t03.model3.json',
     videos: {
-      welcome: 'lobster-welcome.mp4',
-      idle: 'lobster-listening.mp4',
-      listening: 'lobster-listening.mp4',
-      thinking: 'lobster-thinking.mp4',
-      speaking: 'lobster-speaking.mp4',
-      followup: 'lobster-listening.mp4',
-      goodbye: 'lobster-idle.mp4'
+      welcome: 'videos/lobster-welcome.mp4',
+      idle: 'videos/lobster-listening.mp4',
+      listening: 'videos/lobster-listening.mp4',
+      thinking: 'videos/lobster-thinking.mp4',
+      speaking: 'videos/lobster-speaking.mp4',
+      followup: 'videos/lobster-listening.mp4',
+      goodbye: 'videos/lobster-idle.mp4'
     },
     auraColors: {
       idle: { r: 102, g: 126, b: 234 },
@@ -78,13 +78,13 @@ const CHARACTER_PROFILES = {
     ],
     model: 'models/mao/Mao.model3.json',
     videos: {
-      welcome: 'amy-welcome.mp4',
-      idle: 'amy-listening.mp4',
-      listening: 'amy-listening.mp4',
-      thinking: 'amy-listening.mp4',
-      speaking: 'amy-speaking.mp4',
-      followup: 'amy-listening.mp4',
-      goodbye: 'amy-listening.mp4'
+      welcome: 'videos/amy-welcome.mp4',
+      idle: 'videos/amy-listening.mp4',
+      listening: 'videos/amy-listening.mp4',
+      thinking: 'videos/amy-listening.mp4',
+      speaking: 'videos/amy-speaking.mp4',
+      followup: 'videos/amy-listening.mp4',
+      goodbye: 'videos/amy-listening.mp4'
     },
     auraColors: {
       idle: { r: 255, g: 154, b: 162 },
@@ -125,6 +125,70 @@ const CHARACTER_PROFILES = {
       speaking: { r: 171, g: 130, b: 255 }
     },
     defaultVoice: 'en-US-BrianMultilingualNeural'
+  },
+  og_lobster: {
+    id: 'og_lobster',
+    name: 'Lobster',
+    desc: 'The OG animated lobster',
+    icon: 'mdi:shrimp',
+    welcomeText: "Snip snap! I'm the original lobster, ready to help!",
+    thinkingPrompts: [
+      'Scuttling through ideas...',
+      'Pinching some answers...',
+      'Bubbling up a response...',
+      'Let me claw through this...',
+      'Shell-computing...',
+      'Almost got it in my claws!'
+    ],
+    useVideo: true,
+    videos: {
+      welcome: 'videos/lobster-welcome.mp4',
+      idle: 'videos/lobster-idle.mp4',
+      listening: 'videos/lobster-listening.mp4',
+      thinking: 'videos/lobster-thinking.mp4',
+      speaking: 'videos/lobster-speaking.mp4',
+      followup: 'videos/lobster-listening.mp4',
+      goodbye: 'videos/lobster-idle.mp4'
+    },
+    auraColors: {
+      idle: { r: 220, g: 50, b: 50 },
+      listening: { r: 255, g: 100, b: 80 },
+      thinking: { r: 255, g: 140, b: 50 },
+      speaking: { r: 200, g: 40, b: 80 }
+    },
+    defaultVoice: 'en-US-EmmaMultilingualNeural'
+  },
+  og_amy: {
+    id: 'og_amy',
+    name: 'Comic Girl',
+    desc: 'The OG animated comic girl',
+    icon: 'mdi:account-star',
+    welcomeText: "Hey! I'm the original comic girl, what's on your mind?",
+    thinkingPrompts: [
+      'Let me think about that...',
+      'Hmm, working on it...',
+      'One moment please...',
+      'Figuring it out...',
+      'Almost there...',
+      'Got it, hold on!'
+    ],
+    useVideo: true,
+    videos: {
+      welcome: 'videos/amy-welcome.mp4',
+      idle: 'videos/amy-listening.mp4',
+      listening: 'videos/amy-listening.mp4',
+      thinking: 'videos/amy-listening.mp4',
+      speaking: 'videos/amy-speaking.mp4',
+      followup: 'videos/amy-listening.mp4',
+      goodbye: 'videos/amy-listening.mp4'
+    },
+    auraColors: {
+      idle: { r: 255, g: 130, b: 170 },
+      listening: { r: 255, g: 90, b: 140 },
+      thinking: { r: 255, g: 170, b: 160 },
+      speaking: { r: 255, g: 110, b: 140 }
+    },
+    defaultVoice: 'zh-CN-XiaoyiNeural'
   },
   robot: {
     id: 'robot',
@@ -177,6 +241,82 @@ function getThinkingPrompts() {
   return currentCharacter.thinkingPrompts;
 }
 
+// ===== Video avatar chroma-key renderer =====
+let _chromaRAF = null;
+const _chromaVideo = () => document.getElementById('video-avatar');
+const _chromaCanvas = () => document.getElementById('video-avatar-canvas');
+
+function startChromaKey(videoSrc) {
+  stopChromaKey();
+  const video = _chromaVideo();
+  const canvas = _chromaCanvas();
+  if (!video || !canvas) return;
+
+  video.src = videoSrc;
+  video.muted = true;
+  video.play().catch(() => {});
+
+  canvas.style.display = 'block';
+  // Keep the raw video hidden — we only show the canvas
+  video.style.display = 'block';
+  video.style.opacity = '0';
+  video.style.position = 'absolute';
+  video.style.pointerEvents = 'none';
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  function renderFrame() {
+    if (video.paused || video.ended) {
+      _chromaRAF = requestAnimationFrame(renderFrame);
+      return;
+    }
+    if (video.videoWidth && video.videoHeight) {
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      ctx.drawImage(video, 0, 0);
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = frame.data;
+      const threshold = 220;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > threshold && d[i + 1] > threshold && d[i + 2] > threshold) {
+          d[i + 3] = 0;
+        }
+      }
+      ctx.putImageData(frame, 0, 0);
+    }
+    _chromaRAF = requestAnimationFrame(renderFrame);
+  }
+  _chromaRAF = requestAnimationFrame(renderFrame);
+}
+
+function switchChromaVideo(newSrc) {
+  const video = _chromaVideo();
+  if (!video) return;
+  if (video.src.endsWith(newSrc)) return;
+  video.src = newSrc;
+  video.play().catch(() => {});
+}
+
+function stopChromaKey() {
+  if (_chromaRAF) {
+    cancelAnimationFrame(_chromaRAF);
+    _chromaRAF = null;
+  }
+  const video = _chromaVideo();
+  const canvas = _chromaCanvas();
+  if (video) {
+    video.pause();
+    video.src = '';
+    video.style.display = 'none';
+    video.style.opacity = '';
+  }
+  if (canvas) {
+    canvas.style.display = 'none';
+  }
+}
+
 // ===== DOM 元素 =====
 const speechBubble = document.getElementById('speech-bubble');
 const bubbleText = document.getElementById('bubble-text');
@@ -194,6 +334,64 @@ const listeningPulseRing = document.getElementById('listening-pulse-ring');
 const foldToggle = document.getElementById('fold-toggle');
 const bottomPanel = document.getElementById('bottom-panel');
 const chatLogEl = document.getElementById('chat-log');
+
+// ===== Chat log resize handles (top + bottom) =====
+(function initChatLogResize() {
+  if (!chatLogEl) return;
+
+  // Top handle
+  const topHandle = document.createElement('div');
+  topHandle.className = 'chat-log-resize chat-log-resize-top';
+  topHandle.innerHTML = '<div class="chat-log-resize-grip"></div>';
+  chatLogEl.prepend(topHandle);
+
+  // Bottom handle
+  const bottomHandle = document.createElement('div');
+  bottomHandle.className = 'chat-log-resize chat-log-resize-bottom';
+  bottomHandle.innerHTML = '<div class="chat-log-resize-grip"></div>';
+  chatLogEl.appendChild(bottomHandle);
+
+  let dragging = null, startY = 0, startH = 0, startBottom = 0;
+
+  function onDown(edge, e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dragging = edge;
+    startY = e.clientY;
+    startH = chatLogEl.offsetHeight;
+    startBottom = parseInt(getComputedStyle(chatLogEl).bottom) || 0;
+    topHandle.classList.add('dragging');
+    bottomHandle.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+  }
+
+  topHandle.addEventListener('mousedown', (e) => onDown('top', e));
+  bottomHandle.addEventListener('mousedown', (e) => onDown('bottom', e));
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    if (dragging === 'top') {
+      const delta = startY - e.clientY;
+      const newH = Math.max(60, Math.min(startH + delta, window.innerHeight * 0.85));
+      chatLogEl.style.maxHeight = newH + 'px';
+    } else {
+      const delta = e.clientY - startY;
+      const newBottom = Math.max(20, startBottom - delta);
+      const newH = Math.max(60, Math.min(startH + delta, window.innerHeight * 0.85));
+      chatLogEl.style.bottom = newBottom + 'px';
+      chatLogEl.style.maxHeight = newH + 'px';
+    }
+    chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = null;
+    topHandle.classList.remove('dragging');
+    bottomHandle.classList.remove('dragging');
+    document.body.style.cursor = '';
+  });
+})();
 
 // ===== Chat history =====
 function addChatMessage(role, text) {
@@ -227,10 +425,16 @@ function addChatMessage(role, text) {
   timeDiv.textContent = timeStr;
   div.appendChild(timeDiv);
 
-  chatLogEl.appendChild(div);
+  const bottomResize = chatLogEl.querySelector('.chat-log-resize-bottom');
+  if (bottomResize) {
+    chatLogEl.insertBefore(div, bottomResize);
+  } else {
+    chatLogEl.appendChild(div);
+  }
 
-  while (chatLogEl.children.length > 50) {
-    chatLogEl.removeChild(chatLogEl.firstChild);
+  while (chatLogEl.querySelectorAll('.chat-msg').length > 50) {
+    const first = chatLogEl.querySelector('.chat-msg');
+    if (first) first.remove();
   }
 
   chatLogEl.scrollTop = chatLogEl.scrollHeight;
@@ -271,8 +475,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize Live2D renderer
   if (window.Live2DRenderer) {
     live2dRenderer = new Live2DRenderer(lobsterArea);
-    // Load the current character's model
-    if (currentCharacter.model) {
+    // Load the current character's model (Live2D) or start video
+    if (currentCharacter.useVideo) {
+      const live2dCanvas = document.getElementById('live2d-canvas');
+      if (live2dCanvas) live2dCanvas.style.display = 'none';
+      startChromaKey(currentCharacter.videos.idle);
+    } else if (currentCharacter.model) {
       await live2dRenderer.loadModel(currentCharacter.model);
     }
   }
@@ -367,8 +575,12 @@ function setAppState(newState) {
     listeningPulseRing.classList.add('hidden');
   }
 
-  // Update Live2D model state
-  if (live2dRenderer) {
+  // Update avatar state (Live2D or video)
+  if (currentCharacter.useVideo) {
+    if (currentCharacter.videos[newState]) {
+      switchChromaVideo(currentCharacter.videos[newState]);
+    }
+  } else if (live2dRenderer) {
     live2dRenderer.setState(newState);
   }
 
@@ -841,9 +1053,11 @@ async function processAudioQueue() {
   isPlayingQueue = false;
   isSpeaking = false;
 
-  // Log the full streamed response to chat history
+  // Log the full streamed response to chat history (only once)
   if (streamingTextBuffer) {
-    addChatMessage('assistant', streamingTextBuffer);
+    const fullResponse = streamingTextBuffer;
+    streamingTextBuffer = '';
+    addChatMessage('assistant', fullResponse);
   }
 
   // TTS 播放完毕，回到 idle
@@ -1365,7 +1579,7 @@ function carouselPrev() {
   const idx = characterKeys.indexOf(currentCharacter.id);
   const prevIdx = (idx - 1 + characterKeys.length) % characterKeys.length;
   const prevChar = CHARACTER_PROFILES[characterKeys[prevIdx]];
-  if (prevChar && prevChar.model) {
+  if (prevChar) {
     switchCharacter(prevChar.id);
   }
 }
@@ -1374,7 +1588,7 @@ function carouselNext() {
   const idx = characterKeys.indexOf(currentCharacter.id);
   const nextIdx = (idx + 1) % characterKeys.length;
   const nextChar = CHARACTER_PROFILES[characterKeys[nextIdx]];
-  if (nextChar && nextChar.model) {
+  if (nextChar) {
     switchCharacter(nextChar.id);
   }
 }
@@ -1394,9 +1608,20 @@ async function switchCharacter(characterId) {
     auraAnimator.updateColors(newChar.auraColors);
   }
 
-  // Load new Live2D model
-  if (live2dRenderer && newChar.model) {
-    await live2dRenderer.loadModel(newChar.model);
+  const live2dCanvas = document.getElementById('live2d-canvas');
+
+  if (newChar.useVideo) {
+    // Switch to video mode: hide Live2D, show chroma-keyed video
+    if (live2dCanvas) live2dCanvas.style.display = 'none';
+    startChromaKey(newChar.videos.idle);
+  } else {
+    // Switch to Live2D mode: stop chroma video, show Live2D
+    stopChromaKey();
+    if (live2dCanvas) live2dCanvas.style.display = '';
+    // Load new Live2D model
+    if (live2dRenderer && newChar.model) {
+      await live2dRenderer.loadModel(newChar.model);
+    }
   }
 
   // Switch avatar TTS config (per-avatar routing)

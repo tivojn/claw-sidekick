@@ -476,13 +476,15 @@ async function chatWithClawdbot(message) {
       // 监听消息
       const chatHandler = (data) => {
         try {
-          const msg = JSON.parse(data.toString());
+          const raw = data.toString();
+          const msg = JSON.parse(raw);
 
-          // 详细日志：记录所有 Clawdbot 消息（调试）
+          // Verbose debug: log full message for chat events (truncated)
           if (msg.type === 'event') {
-            console.log(`[Clawdbot] 事件: ${msg.event}, payload keys: ${Object.keys(msg.payload || {}).join(',')}, state: ${msg.payload?.state || '-'}`);
+            const payloadStr = JSON.stringify(msg.payload || {}).substring(0, 500);
+            console.log(`[Clawdbot] EVENT: ${msg.event}, payload: ${payloadStr}`);
           } else if (msg.type === 'res' && msg.id !== 'connect-1') {
-            console.log(`[Clawdbot] 响应: id=${msg.id}, ok=${msg.ok}`);
+            console.log(`[Clawdbot] RES: id=${msg.id}, ok=${msg.ok}, data: ${JSON.stringify(msg).substring(0, 300)}`);
           }
 
           // 1. 处理 chat.send 请求的直接响应（错误检测）
@@ -501,16 +503,42 @@ async function chatWithClawdbot(message) {
           if (msg.type === 'event' && msg.event === 'chat') {
             const payload = msg.payload || {};
 
-            // 累积流式文本
-            if (payload.text) {
-              accumulatedText += payload.text;
-              // 将新文本喂给分割器
-              splitter.addText(payload.text);
+            // Try multiple text fields
+            const chunk = payload.text || payload.content || payload.delta || payload.chunk || '';
+            if (chunk) {
+              accumulatedText += chunk;
+              splitter.addText(chunk);
+            }
+
+            // Also check nested content array (some APIs wrap text in content[])
+            if (payload.content && Array.isArray(payload.content)) {
+              for (const c of payload.content) {
+                if (c.type === 'text' && c.text) {
+                  accumulatedText += c.text;
+                  splitter.addText(c.text);
+                }
+              }
+            }
+
+            // Check for full message object in payload
+            if (payload.message && typeof payload.message === 'object' && payload.message.content) {
+              const msgContent = payload.message.content;
+              if (typeof msgContent === 'string') {
+                accumulatedText += msgContent;
+                splitter.addText(msgContent);
+              } else if (Array.isArray(msgContent)) {
+                for (const c of msgContent) {
+                  if (c.type === 'text' && c.text) {
+                    accumulatedText += c.text;
+                    splitter.addText(c.text);
+                  }
+                }
+              }
             }
 
             // 检查完成状态
-            if (payload.state === 'final' || payload.done === true) {
-              console.log('[Clawdbot] 收到 chat final 事件');
+            if (payload.state === 'final' || payload.done === true || payload.state === 'done' || payload.state === 'complete') {
+              console.log(`[Clawdbot] Chat final event. accumulatedText length: ${accumulatedText.length}`);
               clawdbotWs.removeListener('message', chatHandler);
 
               // 刷新分割器剩余文本
@@ -519,33 +547,70 @@ async function chatWithClawdbot(message) {
               // 如果流式已累积文本，直接使用
               if (accumulatedText.length > 0) {
                 clearTimeout(timeout);
-                console.log('[Clawdbot] AI 回复 (流式):', accumulatedText.substring(0, 200));
+                console.log('[Clawdbot] AI reply (stream):', accumulatedText.substring(0, 200));
                 resolve(accumulatedText);
                 return;
               }
 
-              // 否则从历史记录获取
-              clawdbotRequest('chat.history', {
-                sessionKey: 'agent:main:main',
-                limit: 2
-              }).then(history => {
+              // Fallback: try to extract text from the final payload itself
+              const finalText = payload.reply || payload.response || payload.answer || payload.result;
+              if (finalText && typeof finalText === 'string') {
                 clearTimeout(timeout);
-                if (history?.messages) {
-                  const lastAssistant = history.messages.find(m => m.role === 'assistant');
-                  if (lastAssistant && lastAssistant.content) {
-                    const textContent = lastAssistant.content.find(c => c.type === 'text');
-                    if (textContent) {
-                      console.log('[Clawdbot] AI 回复 (历史):', textContent.text.substring(0, 200));
-                      resolve(textContent.text);
-                      return;
+                console.log('[Clawdbot] AI reply (final payload):', finalText.substring(0, 200));
+                resolve(finalText);
+                return;
+              }
+
+              // Last resort: fetch from history with retries
+              console.log('[Clawdbot] No stream text, fetching from history...');
+              const fetchFromHistory = (retries = 3, delay = 1000) => {
+                clawdbotRequest('chat.history', {
+                  sessionKey: 'agent:main:main',
+                  limit: 5
+                }).then(history => {
+                  clearTimeout(timeout);
+                  console.log('[Clawdbot] History response:', JSON.stringify(history).substring(0, 500));
+                  if (history?.messages) {
+                    // Find the last assistant message (search from end)
+                    const reversed = [...history.messages].reverse();
+                    const lastAssistant = reversed.find(m => m.role === 'assistant');
+                    if (lastAssistant) {
+                      // Handle string content
+                      if (typeof lastAssistant.content === 'string') {
+                        console.log('[Clawdbot] AI reply (history string):', lastAssistant.content.substring(0, 200));
+                        resolve(lastAssistant.content);
+                        return;
+                      }
+                      // Handle array content
+                      if (Array.isArray(lastAssistant.content)) {
+                        const texts = lastAssistant.content
+                          .filter(c => c.type === 'text' && c.text)
+                          .map(c => c.text);
+                        if (texts.length > 0) {
+                          const fullText = texts.join('\n');
+                          console.log('[Clawdbot] AI reply (history array):', fullText.substring(0, 200));
+                          resolve(fullText);
+                          return;
+                        }
+                      }
                     }
                   }
-                }
-                resolve('Received, but no reply content found.');
-              }).catch(err => {
-                clearTimeout(timeout);
-                reject(err);
-              });
+                  if (retries > 0) {
+                    console.log(`[Clawdbot] History empty, retrying in ${delay}ms (${retries} left)...`);
+                    setTimeout(() => fetchFromHistory(retries - 1, delay * 1.5), delay);
+                  } else {
+                    resolve('Received, but no reply content found.');
+                  }
+                }).catch(err => {
+                  clearTimeout(timeout);
+                  if (retries > 0) {
+                    setTimeout(() => fetchFromHistory(retries - 1, delay * 1.5), delay);
+                  } else {
+                    reject(err);
+                  }
+                });
+              };
+              fetchFromHistory();
             }
           }
 
@@ -934,6 +999,8 @@ const DEFAULT_SETTINGS = {
     lobster: { ttsProvider: 'edge', edgeVoice: 'en-US-EmmaMultilingualNeural', minimaxVoice: 'English_Graceful_Lady' },
     amy: { ttsProvider: 'edge', edgeVoice: 'zh-CN-XiaoyiNeural', minimaxVoice: 'Chinese (Mandarin)_Lyrical_Voice' },
     cat: { ttsProvider: 'edge', edgeVoice: 'en-US-BrianMultilingualNeural', minimaxVoice: 'English_Persuasive_Man' },
+    og_lobster: { ttsProvider: 'edge', edgeVoice: 'en-US-EmmaMultilingualNeural', minimaxVoice: 'English_Graceful_Lady' },
+    og_amy: { ttsProvider: 'edge', edgeVoice: 'zh-CN-XiaoyiNeural', minimaxVoice: 'Chinese (Mandarin)_Lyrical_Voice' },
     robot: { ttsProvider: 'edge', edgeVoice: 'en-US-BrianMultilingualNeural', minimaxVoice: 'English_Lucky_Robot' }
   },
   stt: { provider: 'deepgram', groqModel: 'whisper-large-v3-turbo' },
