@@ -11,8 +11,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: transparent;
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
-  -webkit-app-region: drag;
 }
 
 body.mini-mode,
@@ -216,6 +216,9 @@ body.mini-mode html {
   -webkit-app-region: no-drag;
   z-index: 20;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  pointer-events: auto;
 }
 
 .speech-bubble::-webkit-scrollbar { width: 4px; }
@@ -398,8 +401,8 @@ body.mini-mode html {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
-  -webkit-app-region: drag;
+  cursor: default;
+  -webkit-app-region: no-drag;
   z-index: 1;
   overflow: hidden;
 }
