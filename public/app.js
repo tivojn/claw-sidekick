@@ -242,6 +242,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   initFilePathClickHandler();  // 初始化文件路径点击处理
   initPTTToggle();  // Listen for global PTT shortcut from main process
 
+  // Load STT provider at startup so PTT uses correct provider
+  try {
+    const stt = await window.electronAPI.stt.getProvider();
+    settingsState.sttProvider = stt.provider || 'deepgram';
+    settingsState.groqModel = stt.groqModel || 'whisper-large-v3-turbo';
+    console.log('[App] STT provider loaded:', settingsState.sttProvider);
+  } catch (e) {
+    console.warn('[App] Failed to load STT provider, defaulting to deepgram');
+  }
+
   // 首次启动播放欢迎动画
   if (isFirstLaunch) {
     playWelcomeVideo();
