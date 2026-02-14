@@ -598,8 +598,11 @@ async function chatWithClaudeCode(message) {
     const claudePath = appSettings.connection?.claudeCodePath || 'claude';
     console.log(`[ClaudeCode] Spawning: ${claudePath} --print "${message.substring(0, 50)}..."`);
     const shellPath = process.env.PATH + ':/opt/homebrew/bin:/usr/local/bin';
+    const cleanEnv = { ...process.env, PATH: shellPath };
+    // Remove CLAUDECODE env var to prevent nested-session detection
+    delete cleanEnv.CLAUDECODE;
     const child = require('child_process').spawn(claudePath, ['--print', message], {
-      env: { ...process.env, PATH: shellPath },
+      env: cleanEnv,
       timeout: 120000
     });
     let stdout = '';
@@ -738,7 +741,9 @@ ipcMain.handle('connection:validateClaudeCode', async () => {
     const claudePath = appSettings.connection?.claudeCodePath || 'claude';
     const { execSync } = require('child_process');
     const shellPath = process.env.PATH + ':/opt/homebrew/bin:/usr/local/bin';
-    const version = execSync(`${claudePath} --version`, { timeout: 5000, env: { ...process.env, PATH: shellPath } }).toString().trim();
+    const cleanEnv = { ...process.env, PATH: shellPath };
+    delete cleanEnv.CLAUDECODE;
+    const version = execSync(`${claudePath} --version`, { timeout: 5000, env: cleanEnv }).toString().trim();
     console.log(`[Connection] Claude Code validated: ${version}`);
     return { valid: true, version };
   } catch (e) {
