@@ -1575,6 +1575,10 @@ closeBtn.addEventListener('click', (e) => {
   window.electronAPI.closeWindow();
 });
 
+// Start folded by default
+bottomPanel.classList.add('folded');
+foldToggle.classList.add('folded');
+
 foldToggle.addEventListener('click', (e) => {
   e.stopPropagation();
   bottomPanel.classList.toggle('folded');

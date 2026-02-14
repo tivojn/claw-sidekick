@@ -612,6 +612,13 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '../public/index.html'));
 
+  // Position window at upper-right of screen
+  const { screen } = require('electron');
+  const display = screen.getPrimaryDisplay();
+  const x = display.workArea.x + display.workArea.width - FULL_WIDTH - 30;
+  const y = display.workArea.y + 30;
+  mainWindow.setPosition(x, y);
+
   // Log renderer console messages to terminal
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     const prefix = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
@@ -907,7 +914,7 @@ ipcMain.on('window:minimize', () => {
   const { screen } = require('electron');
   const display = screen.getPrimaryDisplay();
   const x = display.workArea.x + display.workArea.width - MINI_SIZE - 20;
-  const y = display.workArea.y + display.workArea.height - MINI_SIZE - 20;
+  const y = display.workArea.y + Math.floor(display.workArea.height * 0.55);
   mainWindow.setPosition(x, y);
   mainWindow.webContents.send('window:miniMode', true);
 });
