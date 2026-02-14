@@ -201,9 +201,9 @@ body.mini-mode html {
 /* ===== 语音气泡 ===== */
 .speech-bubble {
   position: absolute;
-  bottom: clamp(80px, 30%, 170px);
-  left: 6%;
-  right: 6%;
+  bottom: clamp(250px, 55%, 380px);
+  left: 15%;
+  right: 15%;
   padding: clamp(8px, 2vw, 14px) clamp(10px, 3vw, 18px);
   background: rgba(60, 60, 80, 0.37);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
@@ -701,6 +701,9 @@ body.mini-mode html {
   -webkit-app-region: no-drag;
   z-index: 20;
   pointer-events: auto;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 .chat-log:empty {
   display: none;
@@ -708,31 +711,30 @@ body.mini-mode html {
 .chat-log::-webkit-scrollbar { display: none; }
 
 .chat-msg {
-  max-width: 82%;
-  padding: 4px 9px;
-  border-radius: 10px;
+  max-width: 90%;
+  padding: 2px 0;
   font-size: clamp(11px, 2.5vw, 13px);
   line-height: 1.5;
   color: #ffffff;
   word-break: break-word;
   letter-spacing: 0.2px;
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 .chat-msg-user {
   align-self: flex-end;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-bottom-right-radius: 4px;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.95);
 }
 .chat-msg-assistant {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-bottom-left-radius: 4px;
+  color: rgba(255, 255, 255, 0.85);
 }
 .chat-msg-time {
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 1px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 0;
 }
 .chat-msg-user .chat-msg-time {
   text-align: right;

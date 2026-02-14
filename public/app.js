@@ -456,22 +456,7 @@ async function playWelcomeAudioFallback() {
 
 // ===== 气泡显示 =====
 function showBubble(content, isUserSpeech = false) {
-  clearTimeout(bubbleHideTimer);
-  speechBubble.style.display = 'block';
-
-  if (isUserSpeech) {
-    speechBubble.className = 'speech-bubble user-speech';
-    bubbleText.innerHTML = content;
-  } else {
-    speechBubble.className = 'speech-bubble ai-response';
-    // 检测文件路径并转换为可点击链接
-    bubbleText.innerHTML = linkifyFilePaths(content);
-  }
-
-  // 自动隐藏
-  bubbleHideTimer = setTimeout(() => {
-    hideBubble();
-  }, BUBBLE_AUTO_HIDE);
+  // Speech bubble removed — no-op
 }
 
 // 打字机效果显示 AI 回复
@@ -1171,19 +1156,6 @@ async function handleSyncTask(command, isGoodbye) {
   isProcessing = true;
 
   setAppState('thinking');
-
-  // 如果当前角色有 preQueryPrompts，先播放提示语再执行查询
-  if (currentCharacter.preQueryPrompts && currentCharacter.preQueryPrompts.length > 0) {
-    const prePrompt = currentCharacter.preQueryPrompts[Math.floor(Math.random() * currentCharacter.preQueryPrompts.length)];
-    showBubble(prePrompt);
-    // 播放提示语（非流式 TTS）
-    await playTextToSpeech(prePrompt);
-  } else {
-    // 其他角色显示思考提示
-    const prompts = getThinkingPrompts();
-    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
-    showBubble(randomPrompt);
-  }
 
   // 重置流式 TTS 状态
   streamingTextBuffer = '';
