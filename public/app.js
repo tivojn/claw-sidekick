@@ -670,6 +670,13 @@ function initPTTToggle() {
   // Use it as a toggle fallback for when the app window is not focused.
   window.electronAPI.ptt.onToggle(() => {
     console.log('[PTT] Global shortcut triggered, state:', appState);
+    // Interrupt any ongoing TTS/processing
+    if (appState === 'speaking' || (isProcessing && appState !== 'listening')) {
+      interruptTTS();
+      isProcessing = false;
+      isSpeaking = false;
+      setAppState('idle');
+    }
     if (appState === 'idle' || appState === 'followup') {
       accumulatedTranscript = '';
       setAppState('listening');
@@ -687,10 +694,6 @@ function initPTTToggle() {
           setAppState('idle');
         }
       });
-    } else if (appState === 'speaking') {
-      interruptTTS();
-      isProcessing = false;
-      setAppState('idle');
     }
   });
 }
@@ -1099,6 +1102,13 @@ async function onLobsterClick() {
 
 // ===== 处理命令 =====
 async function handleCommand(command) {
+  // If speaking/stuck, interrupt to allow new command
+  if (isProcessing && (appState === 'speaking' || appState === 'idle' || appState === 'followup')) {
+    interruptTTS();
+    isProcessing = false;
+    isSpeaking = false;
+    setAppState('idle');
+  }
   if (isProcessing) return;
 
   addChatMessage('user', command);
@@ -1632,11 +1642,12 @@ lobsterArea.addEventListener('click', (e) => {
 // ===== Push to Talk (tap-hint as PTT button) =====
 {
   const startPTT = () => {
-    if (appState === 'speaking') {
+    // Interrupt any ongoing TTS/processing to allow new PTT
+    if (appState === 'speaking' || (isProcessing && appState !== 'listening')) {
       interruptTTS();
       isProcessing = false;
+      isSpeaking = false;
       setAppState('idle');
-      return;
     }
     if (appState === 'idle' || appState === 'followup') {
       accumulatedTranscript = '';
@@ -1840,11 +1851,14 @@ document.addEventListener('keydown', (e) => {
 
   if (codeMatch && modMatch) {
     e.preventDefault();
-    if (appState === 'speaking') {
+    // Interrupt any ongoing TTS/processing
+    if (appState === 'speaking' || (isProcessing && appState !== 'listening')) {
       interruptTTS();
       isProcessing = false;
+      isSpeaking = false;
       setAppState('idle');
-    } else if (appState === 'idle' || appState === 'followup') {
+    }
+    if (appState === 'idle' || appState === 'followup') {
       accumulatedTranscript = '';
       setAppState('listening');
       startRecording();
@@ -2485,7 +2499,15 @@ foldToggle.addEventListener('click', (e) => {
 // ===== 文本输入处理 =====
 async function handleTextInput() {
   const text = textInput.value.trim();
-  if (!text || isProcessing) return;
+  if (!text) return;
+
+  // If TTS is playing or state is stuck, interrupt and allow new input
+  if (isProcessing || appState === 'speaking') {
+    interruptTTS();
+    isProcessing = false;
+    isSpeaking = false;
+    setAppState('idle');
+  }
 
   // 清空输入框
   textInput.value = '';
