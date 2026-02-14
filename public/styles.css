@@ -221,8 +221,7 @@ body.mini-mode html {
   pointer-events: auto;
 }
 
-.speech-bubble::-webkit-scrollbar { width: 4px; }
-.speech-bubble::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+.speech-bubble::-webkit-scrollbar { display: none; }
 
 .bubble-content {
   font-size: 13px;
