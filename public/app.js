@@ -55,10 +55,10 @@ const CHARACTER_PROFILES = {
   },
   amy: {
     id: 'amy',
-    name: 'Amy',
+    name: 'Octavia',
     desc: 'Warm & witty assistant',
     icon: 'mdi:account-heart',
-    welcomeText: "Yo! I'm Amy, what can I do for ya?",
+    welcomeText: "Yo! I'm Octavia, what can I do for ya?",
     thinkingPrompts: [
       'Let me think...',
       'Looking it up for you...',
@@ -157,7 +157,7 @@ const CHARACTER_PROFILES = {
   }
 };
 
-let currentCharacter = CHARACTER_PROFILES.lobster;
+let currentCharacter = CHARACTER_PROFILES.amy;
 
 // Current character video state mapping
 let VIDEO_SOURCES = { ...currentCharacter.videos };
@@ -300,28 +300,24 @@ function setAppState(newState) {
       break;
     case 'listening':
       stateDot.classList.add('listening');
-      statusHint.classList.add('listening');
-      stateText.textContent = 'Listening...';
-      statusHint.textContent = 'Speak now...';
+      stateText.textContent = 'Speak now...';
+      statusHint.textContent = '';
       break;
     case 'thinking':
       stateDot.classList.add('thinking');
-      statusHint.classList.add('thinking');
-      stateText.textContent = 'Thinking...';
-      statusHint.textContent = 'Analyzing your question...';
+      stateText.textContent = 'Analyzing your question...';
+      statusHint.textContent = '';
       showBubble('<div class="thinking-dots"><span></span><span></span><span></span></div>', false);
       break;
     case 'speaking':
       stateDot.classList.add('speaking');
-      statusHint.classList.add('speaking');
       stateText.textContent = 'Replying...';
-      statusHint.textContent = 'Here comes the answer...';
+      statusHint.textContent = '';
       break;
     case 'followup':
       stateDot.classList.add('listening');
-      statusHint.classList.add('listening');
-      stateText.textContent = 'Keep talking, I\'m listening...';
-      statusHint.textContent = 'Ask me anything else';
+      stateText.textContent = 'Ask me anything else';
+      statusHint.textContent = '';
       followupTimer = setTimeout(() => {
         console.log('[App] Follow-up timeout, going idle');
         stopRecording().then(() => {
@@ -331,8 +327,8 @@ function setAppState(newState) {
       }, FOLLOWUP_TIMEOUT);
       break;
     case 'goodbye':
-      stateText.textContent = 'See ya!';
-      statusHint.textContent = 'Catch you later!';
+      stateText.textContent = 'Catch you later!';
+      statusHint.textContent = '';
       break;
   }
 
