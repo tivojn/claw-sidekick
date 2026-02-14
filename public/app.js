@@ -649,6 +649,8 @@ function initFilePathClickHandler() {
 // ===== PTT Toggle (from Electron globalShortcut) =====
 function initPTTToggle() {
   if (!window.electronAPI || !window.electronAPI.ptt) return;
+  // Global shortcut fires on keydown only (no keyup from Electron globalShortcut).
+  // Use it as a toggle fallback for when the app window is not focused.
   window.electronAPI.ptt.onToggle(() => {
     console.log('[PTT] Global shortcut triggered, state:', appState);
     if (appState === 'idle' || appState === 'followup') {
@@ -1671,7 +1673,7 @@ document.getElementById('avatar-next').addEventListener('click', (e) => {
 const tapKeycap = document.getElementById('tap-keycap');
 
 // Default combo: Option+Space (fn is not detectable via JS)
-const DEFAULT_COMBO = { ctrl: false, alt: true, shift: false, meta: false, code: 'Space' };
+const DEFAULT_COMBO = { ctrl: false, alt: true, shift: false, meta: false, code: 'KeyZ' };
 
 // e.code → display label (physical key names)
 const CODE_LABEL = {
@@ -1811,7 +1813,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // --- Push-to-talk trigger ---
+  // --- Push-to-talk trigger (hold to record) ---
   if (anyPanelOpen) return;
   if (e.repeat) return;
   if (document.activeElement === textInput) return;
@@ -1827,27 +1829,14 @@ document.addEventListener('keydown', (e) => {
 
   if (codeMatch && modMatch) {
     e.preventDefault();
-    if (appState === 'idle' || appState === 'followup') {
-      accumulatedTranscript = '';
-      setAppState('listening');
-      startRecording();
-    } else if (appState === 'listening') {
-      stopRecording().then((transcript) => {
-        if (transcript) {
-          showBubble('🎤 ' + escapeHtml(transcript), true);
-          handleCommand(transcript);
-        } else if (accumulatedTranscript.trim()) {
-          const cmd = accumulatedTranscript;
-          accumulatedTranscript = '';
-          handleCommand(cmd);
-        } else {
-          setAppState('idle');
-        }
-      });
-    } else if (appState === 'speaking') {
+    if (appState === 'speaking') {
       interruptTTS();
       isProcessing = false;
       setAppState('idle');
+    } else if (appState === 'idle' || appState === 'followup') {
+      accumulatedTranscript = '';
+      setAppState('listening');
+      startRecording();
     }
   }
 
@@ -1858,6 +1847,39 @@ document.addEventListener('keydown', (e) => {
     stopRecording().then(() => {
       setAppState('idle');
       showBubble('Recording cancelled');
+    });
+  }
+});
+
+// Global keyup handler for hold-to-talk release
+document.addEventListener('keyup', (e) => {
+  if (isCapturingHotkey) return;
+  if (isAnyPanelOpen()) return;
+  if (document.activeElement === textInput) return;
+  if (appState !== 'listening') return;
+
+  const cc = comboCode(pttCombo);
+  // Match the key that was released (modifiers may already be released)
+  const codeMatch = cc === 'fn' ? (e.key === 'Fn' || e.key === 'fn') : e.code === cc;
+  // Also trigger if a modifier key is released while listening (e.g., Alt released before Z)
+  const modReleased = (pttCombo.alt && (e.code === 'AltLeft' || e.code === 'AltRight')) ||
+                      (pttCombo.ctrl && (e.code === 'ControlLeft' || e.code === 'ControlRight')) ||
+                      (pttCombo.shift && (e.code === 'ShiftLeft' || e.code === 'ShiftRight')) ||
+                      (pttCombo.meta && (e.code === 'MetaLeft' || e.code === 'MetaRight'));
+
+  if (codeMatch || modReleased) {
+    e.preventDefault();
+    stopRecording().then((transcript) => {
+      if (transcript) {
+        showBubble('🎤 ' + escapeHtml(transcript), true);
+        handleCommand(transcript);
+      } else if (accumulatedTranscript.trim()) {
+        const cmd = accumulatedTranscript;
+        accumulatedTranscript = '';
+        handleCommand(cmd);
+      } else {
+        setAppState('idle');
+      }
     });
   }
 });

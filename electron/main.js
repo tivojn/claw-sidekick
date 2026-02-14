@@ -1663,8 +1663,8 @@ app.whenReady().then(() => {
   }).catch(err => {
     console.warn('[启动] Clawdbot 预连接失败（首次对话时会重试）:', err.message);
   });
-  // Register default PTT shortcut (Option+Space)
-  const savedCombo = appSettings.hotkey || { alt: true, code: 'Space' };
+  // Register default PTT shortcut (Option+Z)
+  const savedCombo = appSettings.hotkey || { alt: true, code: 'KeyZ' };
   registerPTTShortcut(savedCombo);
 });
 
