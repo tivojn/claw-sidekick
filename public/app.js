@@ -272,10 +272,10 @@ function setAppState(newState) {
   statusHint.className = 'status-hint';
 
   // 控制点击引导和脉冲环
-  if (newState === 'idle') {
-    tapHint.classList.remove('hidden');
-  } else {
+  if (newState === 'listening' || newState === 'speaking') {
     tapHint.classList.add('hidden');
+  } else {
+    tapHint.classList.remove('hidden');
   }
   if (newState === 'listening' || newState === 'followup') {
     listeningPulseRing.classList.remove('hidden');
@@ -290,7 +290,6 @@ function setAppState(newState) {
 
   switch (newState) {
     case 'welcome':
-      tapHint.classList.add('hidden');
       stateText.textContent = `Welcome to ${currentCharacter.name}`;
       statusHint.textContent = '';
       break;

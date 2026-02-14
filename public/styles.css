@@ -459,7 +459,7 @@ body.mini-mode html {
 /* ===== 点击开始对话引导 ===== */
 .tap-hint {
   position: absolute;
-  bottom: 4px;
+  bottom: 45px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
@@ -467,16 +467,14 @@ body.mini-mode html {
   align-items: center;
   gap: 5px;
   padding: 4px 14px;
-  background: rgba(255, 255, 255, 0.7);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 14px;
-  animation: tapHintPulse 2s ease-in-out infinite, tapHintFloat 3s ease-in-out infinite;
   cursor: pointer;
   pointer-events: none;
   white-space: nowrap;
-  box-shadow: var(--shadow-sm);
 }
 
 .tap-hint .tap-icon {
