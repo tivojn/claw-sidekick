@@ -469,15 +469,37 @@ body.mini-mode html {
   display: flex;
   align-items: center;
   gap: clamp(3px, 1vw, 5px);
-  padding: clamp(3px, 0.8vw, 4px) clamp(8px, 2.5vw, 14px);
-  background: rgba(255, 255, 255, 0.35);
+  padding: clamp(5px, 1vw, 7px) clamp(12px, 3vw, 18px);
+  background: rgba(255, 255, 255, 0.4);
   -webkit-backdrop-filter: blur(16px) saturate(150%);
   backdrop-filter: blur(16px) saturate(150%);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: clamp(10px, 2.5vw, 14px);
   cursor: pointer;
-  pointer-events: none;
+  pointer-events: auto;
   white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+}
+.tap-hint:hover {
+  background: rgba(255, 255, 255, 0.55);
+  border-color: rgba(129, 140, 248, 0.3);
+  box-shadow: 0 2px 8px rgba(129, 140, 248, 0.15);
+}
+.tap-hint:active,
+.tap-hint.recording {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  transform: translateX(-50%) scale(0.97);
+}
+.tap-hint.recording .tap-icon {
+  color: rgba(239, 68, 68, 0.8);
+  animation: none;
+}
+.tap-hint.recording .tap-text {
+  color: rgba(239, 68, 68, 0.8);
 }
 
 .tap-hint .tap-icon {
@@ -488,9 +510,9 @@ body.mini-mode html {
 
 .tap-hint .tap-text {
   font-size: clamp(10px, 2.5vw, 13px);
-  font-weight: 400;
+  font-weight: 500;
   color: var(--text-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
 .tap-hint.hidden {
@@ -658,15 +680,21 @@ body.mini-mode html {
   -webkit-app-region: no-drag;
 }
 
-/* ===== Chat log ===== */
+/* ===== Chat log (inside lobster-area) ===== */
 .chat-log {
-  max-height: 160px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 55%;
   overflow-y: auto;
-  padding: 4px 12px;
+  padding: 6px 10px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  z-index: 20;
   -webkit-app-region: no-drag;
+  pointer-events: auto;
 }
 .chat-log:empty {
   display: none;
@@ -674,24 +702,29 @@ body.mini-mode html {
 .chat-log::-webkit-scrollbar { display: none; }
 
 .chat-msg {
-  max-width: 85%;
-  padding: 3px 8px;
-  border-radius: 8px;
-  font-size: 11px;
+  max-width: 78%;
+  padding: 5px 10px;
+  border-radius: 12px;
+  font-size: 11.5px;
   line-height: 1.4;
   word-break: break-word;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 .chat-msg-user {
   align-self: flex-end;
-  background: rgba(129, 140, 248, 0.15);
-  color: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(129, 140, 248, 0.2);
+  background: rgba(129, 140, 248, 0.3);
+  color: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-bottom-right-radius: 4px;
 }
 .chat-msg-assistant {
   align-self: flex-start;
-  background: rgba(0, 0, 0, 0.04);
-  color: rgba(30, 41, 59, 0.7);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.8);
+  color: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom-left-radius: 4px;
 }
 .chat-msg-time {
   font-size: 9px;
@@ -700,6 +733,60 @@ body.mini-mode html {
 }
 .chat-msg-user .chat-msg-time {
   text-align: right;
+}
+.chat-msg-view {
+  font-size: 10px;
+  color: rgba(129, 140, 248, 0.8);
+  cursor: pointer;
+  margin-left: 4px;
+}
+.chat-msg-view:hover {
+  text-decoration: underline;
+}
+
+/* ===== Push to Talk bar ===== */
+.ptt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 4px 12px;
+  padding: 8px 0;
+  border-radius: 10px;
+  background: rgba(129, 140, 248, 0.1);
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+.ptt-bar:hover {
+  background: rgba(129, 140, 248, 0.18);
+  border-color: rgba(129, 140, 248, 0.35);
+}
+.ptt-bar:active,
+.ptt-bar.recording {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  transform: scale(0.98);
+}
+.ptt-bar-icon {
+  font-size: 16px;
+  color: rgba(129, 140, 248, 0.7);
+}
+.ptt-bar:active .ptt-bar-icon,
+.ptt-bar.recording .ptt-bar-icon {
+  color: rgba(239, 68, 68, 0.8);
+}
+.ptt-bar-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(30, 41, 59, 0.6);
+}
+.ptt-bar:active .ptt-bar-label,
+.ptt-bar.recording .ptt-bar-label {
+  color: rgba(239, 68, 68, 0.7);
 }
 
 /* ===== 文本输入区域 ===== */

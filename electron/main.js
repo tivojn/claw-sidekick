@@ -1655,6 +1655,19 @@ ipcMain.handle('ptt:setShortcut', (event, combo) => {
 });
 
 // ===== 应用生命周期 =====
+// Single instance lock — prevent multiple instances from running
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('[App] Another instance is running, quitting.');
+  app.quit();
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
   // 预连接 Clawdbot（不等待，后台连接）

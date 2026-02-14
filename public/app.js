@@ -197,24 +197,38 @@ const chatLogEl = document.getElementById('chat-log');
 
 // ===== Chat history =====
 function addChatMessage(role, text) {
+  if (!chatLogEl) return;
   const now = new Date();
   chatHistory.push({ role, text, timestamp: now });
-  // Keep limited to 50 messages
   if (chatHistory.length > 50) chatHistory.shift();
 
   const div = document.createElement('div');
   div.className = 'chat-msg chat-msg-' + role;
 
-  const truncated = text.length > 100 ? text.substring(0, 100) + '...' : text;
+  const truncated = text.length > 150 ? text.substring(0, 150) + '...' : text;
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  div.innerHTML =
-    '<div class="chat-msg-text">' + escapeHtml(truncated) + '</div>' +
-    '<div class="chat-msg-time">' + timeStr + '</div>';
+  const textDiv = document.createElement('div');
+  textDiv.className = 'chat-msg-text';
+  textDiv.textContent = truncated;
+  div.appendChild(textDiv);
+
+  // "View" link for long AI responses
+  if (role === 'assistant' && text.length > 150) {
+    const viewBtn = document.createElement('span');
+    viewBtn.className = 'chat-msg-view';
+    viewBtn.textContent = 'View';
+    viewBtn.addEventListener('click', (e) => { e.stopPropagation(); openTextViewer(text); });
+    div.appendChild(viewBtn);
+  }
+
+  const timeDiv = document.createElement('div');
+  timeDiv.className = 'chat-msg-time';
+  timeDiv.textContent = timeStr;
+  div.appendChild(timeDiv);
 
   chatLogEl.appendChild(div);
 
-  // Remove old DOM nodes to match 50 limit
   while (chatLogEl.children.length > 50) {
     chatLogEl.removeChild(chatLogEl.firstChild);
   }
@@ -338,12 +352,15 @@ function setAppState(newState) {
   stateDot.className = 'state-dot';
   statusHint.className = 'status-hint';
 
-  // 控制点击引导和脉冲环
-  if (newState === 'listening' || newState === 'speaking') {
-    tapHint.classList.add('hidden');
-  } else {
-    tapHint.classList.remove('hidden');
+  // Update tap-hint PTT visual state
+  if (tapHint) {
+    tapHint.classList.toggle('recording', newState === 'listening');
+    const tapText = tapHint.querySelector('.tap-text');
+    if (tapText) tapText.textContent = newState === 'listening' ? 'Listening...' : 'Push to Talk';
   }
+
+  // PTT button always visible
+  tapHint.classList.remove('hidden');
   if (newState === 'listening' || newState === 'followup') {
     listeningPulseRing.classList.remove('hidden');
   } else {
@@ -660,7 +677,7 @@ function initPTTToggle() {
     } else if (appState === 'listening') {
       stopRecording().then((transcript) => {
         if (transcript) {
-          showBubble('🎤 ' + escapeHtml(transcript), true);
+          // User speech shown in chat log via handleCommand → addChatMessage
           handleCommand(transcript);
         } else if (accumulatedTranscript.trim()) {
           const cmd = accumulatedTranscript;
@@ -700,7 +717,7 @@ function initDeepgramListeners() {
         }
 
         // 显示累积的用户语音
-        showBubble('🎤 ' + escapeHtml(accumulatedTranscript), true);
+        // User speech shown in chat log via handleCommand → addChatMessage
 
         // 清除之前的执行定时器
         clearTimeout(executeTimer);
@@ -1126,7 +1143,6 @@ async function handleAsyncTask(command) {
       const feedback = feedbackMessages[Math.floor(Math.random() * feedbackMessages.length)];
 
       addChatMessage('assistant', feedback);
-      showBubble(feedback);
       await playTextToSpeech(feedback);
 
       setAppState('idle');
@@ -1181,10 +1197,7 @@ async function handleSyncTask(command, isGoodbye) {
       // No streaming audio received — use traditional TTS
       addChatMessage('assistant', cleanedMessage);
       setAppState('speaking');
-      showBubbleWithViewBtn(cleanedMessage);
       await playTextToSpeech(cleanedMessage);
-
-      showBubbleWithTyping(escapeHtml(cleanedMessage));
 
       if (isGoodbye) {
         setAppState('goodbye');
@@ -1500,7 +1513,7 @@ async function onMiniOrbTap() {
     clearTimeout(executeTimer);
     const transcript = await stopRecording();
     if (transcript) {
-      showBubble('🎤 ' + escapeHtml(transcript), true);
+      // User speech shown in chat log via handleCommand → addChatMessage
       handleCommand(transcript);
     } else if (accumulatedTranscript.trim()) {
       const cmd = accumulatedTranscript;
@@ -1610,54 +1623,52 @@ function exitMiniMode() {
 }
 
 // ===== 事件监听 =====
-// Avatar tap (quick) = interrupt/focus; hold (300ms+) = push-to-talk
-let avatarPressTimer = null;
-let avatarIsHolding = false;
-
-lobsterArea.addEventListener('mousedown', (e) => {
+// Avatar click = interrupt TTS / focus
+lobsterArea.addEventListener('click', (e) => {
   if (e.target.closest('.avatar-nav') || e.target.closest('.tap-hint')) return;
-  avatarIsHolding = false;
-  avatarPressTimer = setTimeout(() => {
-    avatarIsHolding = true;
+  onLobsterClick();
+});
+
+// ===== Push to Talk (tap-hint as PTT button) =====
+{
+  const startPTT = () => {
+    if (appState === 'speaking') {
+      interruptTTS();
+      isProcessing = false;
+      setAppState('idle');
+      return;
+    }
     if (appState === 'idle' || appState === 'followup') {
       accumulatedTranscript = '';
       setAppState('listening');
       startRecording();
     }
-  }, 300);
-});
+  };
 
-lobsterArea.addEventListener('mouseup', async (e) => {
-  if (e.target.closest('.avatar-nav') || e.target.closest('.tap-hint')) return;
-  clearTimeout(avatarPressTimer);
-  if (avatarIsHolding && isRecording) {
-    avatarIsHolding = false;
+  const stopPTT = async () => {
+    if (appState !== 'listening' || !isRecording) return;
     const transcript = await stopRecording();
     if (transcript) {
-      showBubble('🎤 ' + escapeHtml(transcript), true);
       handleCommand(transcript);
-    } else if (!useGroqSTT && accumulatedTranscript.trim()) {
+    } else if (accumulatedTranscript.trim()) {
       const cmd = accumulatedTranscript;
       accumulatedTranscript = '';
       handleCommand(cmd);
-    } else if (appState === 'listening') {
+    } else {
       setAppState('idle');
     }
-  } else if (!avatarIsHolding) {
-    onLobsterClick();
-  }
-  avatarIsHolding = false;
-});
+  };
 
-lobsterArea.addEventListener('mouseleave', () => {
-  clearTimeout(avatarPressTimer);
-  if (avatarIsHolding && isRecording) {
-    avatarIsHolding = false;
-    accumulatedTranscript = '';
-    stopRecording();
-    setAppState('idle');
-  }
-});
+  // Mouse events
+  tapHint.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); startPTT(); });
+  tapHint.addEventListener('mouseup', (e) => { e.preventDefault(); e.stopPropagation(); stopPTT(); });
+  tapHint.addEventListener('mouseleave', () => { if (isRecording) stopPTT(); });
+
+  // Touch events
+  tapHint.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); startPTT(); });
+  tapHint.addEventListener('touchend', (e) => { e.preventDefault(); e.stopPropagation(); stopPTT(); });
+  tapHint.addEventListener('touchcancel', () => { if (isRecording) stopPTT(); });
+}
 
 // Avatar carousel buttons
 document.getElementById('avatar-prev').addEventListener('click', (e) => {
@@ -1871,7 +1882,7 @@ document.addEventListener('keyup', (e) => {
     e.preventDefault();
     stopRecording().then((transcript) => {
       if (transcript) {
-        showBubble('🎤 ' + escapeHtml(transcript), true);
+        // User speech shown in chat log via handleCommand → addChatMessage
         handleCommand(transcript);
       } else if (accumulatedTranscript.trim()) {
         const cmd = accumulatedTranscript;
@@ -2479,8 +2490,7 @@ async function handleTextInput() {
   // 清空输入框
   textInput.value = '';
 
-  // 显示用户输入的文字
-  showBubble('💬 ' + escapeHtml(text), true);
+  // User text shown in chat log via handleCommand → addChatMessage
 
   // 直接处理命令（不需要语音识别）
   await handleCommand(text);
